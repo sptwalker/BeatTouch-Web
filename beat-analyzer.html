@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeatTouch - 音乐自动打点</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 自定义样式 */
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .beat-marker {
+            transition: all 0.2s ease;
+        }
+        .beat-marker:hover {
+            transform: scale(1.1);
+        }
+        .beat-marker.active {
+            animation: pulse 0.5s ease;
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.8; }
+        }
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            background: rgba(255, 255, 255, 0.2);
+            height: 6px;
+            border-radius: 3px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #3b82f6;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            margin-top: -6px;
+            transition: transform 0.1s;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+        .progress-container {
+            cursor: pointer;
+        }
+        .progress-fill {
+            transition: width 0.1s linear;
+        }
+    </style>
+</head>
+<body class="text-gray-100 font-sans">
+    <div class="container mx-auto px-4 py-6 max-w-5xl">
+        <!-- 标题 -->
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent mb-2">
+                BeatTouch 音乐打点
+            </h1>
+            <p class="text-gray-400">MP3 自动节拍解析与手动微调工具</p>
+        </header>
+
+        <!-- 上传控制区 -->
+        <section class="glass-panel rounded-2xl p-6 mb-6">
+            <!-- 文件上传 -->
+            <div class="flex flex-wrap items-center gap-4 mb-6">
+                <label class="flex-1 min-w-[200px] cursor-pointer">
+                    <input type="file" id="audio-upload" accept="audio/mp3,audio/*" class="hidden">
+                    <div class="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white py-3 px-6 rounded-xl transition-all hover:scale-105">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                        </svg>
+                        <span>上传 MP3 文件</span>
+                    </div>
+                </label>
+                <div id="file-info" class="text-gray-400 text-sm hidden">
+                    <span class="text-blue-400 font-medium" id="filename"></span>
+                    <span id="filesize" class="ml-2"></span>
+                </div>
+            </div>
+
+            <!-- 解析状态 -->
+            <div id="analyze-status" class="hidden mb-6">
+                <div class="flex items-center gap-3">
+                    <div class="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent"></div>
+                    <span class="text-blue-400">正在解析音乐节拍...</span>
+                </div>
+            </div>
+
+            <!-- 播放器控制 -->
+            <div id="player-controls" class="opacity-50 pointer-events-none transition-opacity">
+                <!-- 进度条 -->
+                <div class="mb-4">
+                    <div class="flex justify-between text-sm text-gray-400 mb-2">
+                        <span id="current-time">0:00</span>
+                        <span id="total-time">0:00</span>
+                    </div>
+                    <div class="progress-container h-3 bg-gray-700 rounded-full overflow-hidden" id="progress-container">
+                        <div class="progress-fill h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full" id="progress-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- 控制按钮和音量 -->
+                <div class="flex items-center justify-between flex-wrap gap-4">
+                    <div class="flex items-center gap-3">
+                        <button id="btn-play" class="w-12 h-12 flex items-center justify-center bg-green-600 hover:bg-green-500 rounded-full transition-all hover:scale-110">
+                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z"/>
+                            </svg>
+                        </button>
+                        <button id="btn-pause" class="hidden w-12 h-12 flex items-center justify-center bg-yellow-600 hover:bg-yellow-500 rounded-full transition-all hover:scale-110">
+                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                            </svg>
+                        </button>
+                        <button id="btn-stop" class="w-10 h-10 flex items-center justify-center bg-red-600 hover:bg-red-500 rounded-full transition-all hover:scale-110">
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M6 6h12v12H6z"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- 音量控制 -->
+                    <div class="flex items-center gap-3 flex-1 max-w-xs">
+                        <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
+                        </svg>
+                        <input type="range" id="volume-slider" min="0" max="100" value="70" class="flex-1">
+                        <span id="volume-value" class="text-sm text-gray-400 w-10 text-right">70%</span>
+                    </div>
+
+                    <!-- BPM显示 -->
+                    <div class="flex items-center gap-4">
+                        <div class="text-center">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider">BPM</div>
+                            <div id="bpm-display" class="text-2xl font-bold text-purple-400">--</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-xs text-gray-500 uppercase tracking-wider">节拍数</div>
+                            <div id="beat-count" class="text-2xl font-bold text-blue-400">0</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 节拍可视化区 -->
+        <section id="visualizer-section" class="glass-panel rounded-2xl p-6 mb-6 hidden">
+            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                <svg class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path>
+                </svg>
+                节拍可视化
+            </h2>
+            <div class="relative h-24 bg-gray-900 rounded-xl overflow-hidden" id="beat-visualizer">
+                <!-- 节拍标记将通过JS动态生成 -->
+                <div class="absolute inset-0 flex items-center justify-center text-gray-600" id="visualizer-placeholder">
+                    解析后将显示节拍标记
+                </div>
+            </div>
+        </section>
+
+        <!-- 打点数据操作区 -->
+        <section class="glass-panel rounded-2xl p-6 mb-6">
+            <div class="flex items-center justify-between flex-wrap gap-4 mb-4">
+                <h2 class="text-xl font-semibold flex items-center gap-2">
+                    <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+                    </svg>
+                    打点数据操作
+                </h2>
+                <div class="flex gap-2">
+                    <button id="btn-export" class="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 text-white py-2 px-4 rounded-lg transition-all hover:scale-105" disabled>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        导出 JSON
+                    </button>
+                    <label class="cursor-pointer">
+                        <input type="file" id="import-json" accept=".json" class="hidden">
+                        <div class="flex items-center gap-2 bg-gray-600 hover:bg-gray-500 text-white py-2 px-4 rounded-lg transition-all hover:scale-105">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                            </svg>
+                            导入 JSON
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- 当前播放位置的节拍添加 -->
+            <div class="flex items-center gap-4 mb-4 p-4 bg-gray-800/50 rounded-xl">
+                <div class="flex-1">
+                    <span class="text-sm text-gray-400">当前播放位置:</span>
+                    <span id="current-pos-display" class="text-lg font-mono text-blue-400 ml-2">0.000s</span>
+                </div>
+                <button id="btn-add-beat" class="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white py-2 px-4 rounded-lg transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    添加节拍点
+                </button>
+            </div>
+        </section>
+
+        <!-- 打点数据列表 -->
+        <section class="glass-panel rounded-2xl p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-semibold flex items-center gap-2">
+                    <svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                    </svg>
+                    打点数据列表
+                </h2>
+                <button id="btn-clear-all" class="text-red-400 hover:text-red-300 text-sm flex items-center gap-1 transition-colors" disabled>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                    </svg>
+                    清空全部
+                </button>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="text-left text-gray-500 border-b border-gray-700">
+                            <th class="pb-3 font-medium">序号</th>
+                            <th class="pb-3 font-medium">时间戳 (秒)</th>
+                            <th class="pb-3 font-medium">时间 (分:秒)</th>
+                            <th class="pb-3 font-medium text-right">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="beat-list-body">
+                        <tr>
+                            <td colspan="4" class="py-8 text-center text-gray-500">
+                                暂无打点数据，请上传 MP3 文件或导入 JSON
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- 音频元素 -->
+    <audio id="audio-player" crossorigin="anonymous"></audio>
+
+    <!-- 引入 web-audio-beat-detector -->
+    <script src="https://cdn.jsdelivr.net/npm/web-audio-beat-detector@8.0.0/build/es5/bundle.min.js"></script>
+
+    <script>
+        /**
+         * BeatTouch 音乐自动打点模块
+         * 核心功能：MP3节拍解析、播放控制、打点数据管理
+         */
+
+        // ==================== 全局状态 ====================
+        const state = {
+            audioContext: null,           // Web Audio API 上下文
+            audioBuffer: null,            // 解码后的音频数据
+            beatData: {                   // 打点数据
+                bpm: 0,
+                beatList: [],             // 节拍时间戳数组（秒）
+                duration: 0
+            },
+            isAnalyzing: false,           // 是否正在解析
+            currentBeatIndex: -1,         // 当前播放到的节拍索引
+            isDraggingProgress: false     // 是否正在拖拽进度条
+        };
+
+        // ==================== DOM 元素引用 ====================
+        const elements = {
+            audioUpload: document.getElementById('audio-upload'),
+            importJson: document.getElementById('import-json'),
+            audioPlayer: document.getElementById('audio-player'),
+            fileInfo: document.getElementById('file-info'),
+            filename: document.getElementById('filename'),
+            filesize: document.getElementById('filesize'),
+            analyzeStatus: document.getElementById('analyze-status'),
+            playerControls: document.getElementById('player-controls'),
+            btnPlay: document.getElementById('btn-play'),
+            btnPause: document.getElementById('btn-pause'),
+            btnStop: document.getElementById('btn-stop'),
+            btnExport: document.getElementById('btn-export'),
+            btnAddBeat: document.getElementById('btn-add-beat'),
+            btnClearAll: document.getElementById('btn-clear-all'),
+            progressContainer: document.getElementById('progress-container'),
+            progressBar: document.getElementById('progress-bar'),
+            currentTime: document.getElementById('current-time'),
+            totalTime: document.getElementById('total-time'),
+            currentPosDisplay: document.getElementById('current-pos-display'),
+            volumeSlider: document.getElementById('volume-slider'),
+            volumeValue: document.getElementById('volume-value'),
+            bpmDisplay: document.getElementById('bpm-display'),
+            beatCount: document.getElementById('beat-count'),
+            beatListBody: document.getElementById('beat-list-body'),
+            visualizerSection: document.getElementById('visualizer-section'),
+            beatVisualizer: document.getElementById('beat-visualizer'),
+            visualizerPlaceholder: document.getElementById('visualizer-placeholder')
+        };
+
+        // ==================== 工具函数 ====================
+
+        /**
+         * 格式化时间为 mm:ss 格式
+         * @param {number} seconds - 秒数
+         * @returns {string} 格式化后的时间字符串
+         */
+        function formatTime(seconds) {
+            if (isNaN(seconds) || seconds < 0) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        /**
+         * 格式化时间为 mm:ss.ms 格式
+         * @param {number} seconds - 秒数
+         * @returns {string} 格式化后的时间字符串
+         */
+        function formatTimeMs(seconds) {
+            if (isNaN(seconds) || seconds < 0) return '0:00.000';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            const ms = Math.floor((seconds % 1) * 1000);
+            return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
+        }
+
+        /**
+         * 格式化文件大小
+         * @param {number} bytes - 字节数
+         * @returns {string} 格式化后的大小字符串
+         */
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // ==================== 音频处理 ====================
+
+        /**
+         * 初始化 Web Audio API 上下文
+         */
+        function initAudioContext() {
+            if (!state.audioContext) {
+                state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (state.audioContext.state === 'suspended') {
+                state.audioContext.resume();
+            }
+        }
+
+        /**
+         * 解析音频文件，提取节拍信息
+         * @param {File} file - MP3文件对象
+         */
+        async function analyzeAudio(file) {
+            try {
+                state.isAnalyzing = true;
+                elements.analyzeStatus.classList.remove('hidden');
+                elements.playerControls.classList.add('opacity-50', 'pointer-events-none');
+
+                // 初始化音频上下文
+                initAudioContext();
+
+                // 读取文件为 ArrayBuffer
+                const arrayBuffer = await file.arrayBuffer();
+
+                // 解码音频数据
+                state.audioBuffer = await state.audioContext.decodeAudioData(arrayBuffer);
+                state.beatData.duration = state.audioBuffer.duration;
+
+                // 使用 web-audio-beat-detector 检测节拍
+                // 注意：该库需要音频 buffer 作为输入
+                const tempo = await webAudioBeatDetector.analyze(state.audioBuffer);
+                
+                // 计算节拍时间戳列表
+                const beats = [];
+                const interval = 60 / tempo.bpm; // 每拍间隔（秒）
+                const totalBeats = Math.floor(state.audioBuffer.duration / interval);
+                
+                for (let i = 0; i < totalBeats; i++) {
+                    beats.push(parseFloat((i * interval).toFixed(3)));
+                }
+
+                state.beatData.bpm = Math.round(tempo.bpm);
+                state.beatData.beatList = beats;
+
+                // 设置音频源
+                const blobUrl = URL.createObjectURL(file);
+                elements.audioPlayer.src = blobUrl;
+                elements.audioPlayer.volume = elements.volumeSlider.value / 100;
+
+                // 更新UI
+                updateBeatListUI();
+                updateVisualizer();
+                updateStatusDisplay();
+                enableControls();
+
+                console.log('[BeatTouch] 解析完成:', state.beatData);
+
+            } catch (error) {
+                console.error('[BeatTouch] 解析失败:', error);
+                alert('音频解析失败: ' + error.message);
+            } finally {
+                state.isAnalyzing = false;
+                elements.analyzeStatus.classList.add('hidden');
+            }
+        }
+
+        /**
+         * 使用 web-audio-beat-detector 分析节拍
+         * 该库返回 BPM 信息，我们基于 BPM 生成节拍时间戳
+         */
+        const webAudioBeatDetector = {
+            async analyze(audioBuffer) {
+                // 使用库的全局函数
+                if (typeof window.analyze === 'function') {
+                    return await window.analyze(audioBuffer);
+                }
+                // 备用方案：简单的 BPM 估计
+                return this.estimateBPM(audioBuffer);
+            },
+
+            // 简单的 BPM 估计（基于音频能量变化）
+            estimateBPM(audioBuffer) {
+                const channelData = audioBuffer.getChannelData(0);
+                const sampleRate = audioBuffer.sampleRate;
+                const bufferSize = 1024;
+                const hopSize = 512;
+                
+                // 计算能量包络
+                const energies = [];
+                for (let i = 0; i < channelData.length; i += hopSize) {
+                    let energy = 0;
+                    for (let j = 0; j < bufferSize && (i + j) < channelData.length; j++) {
+                        energy += channelData[i + j] * channelData[i + j];
+                    }
+                    energies.push(energy / bufferSize);
+                }
+
+                // 检测 onset（能量突变点）
+                const onsets = [];
+                const threshold = 1.5;
+                for (let i = 1; i < energies.length; i++) {
+                    if (energies[i] > energies[i - 1] * threshold && energies[i] > 0.01) {
+                        onsets.push(i * hopSize / sampleRate);
+                    }
+                }
+
+                // 计算平均间隔估算 BPM
+                let totalInterval = 0;
+                let intervalCount = 0;
+                for (let i = 1; i < Math.min(onsets.length, 20); i++) {
+                    totalInterval += onsets[i] - onsets[i - 1];
+                    intervalCount++;
+                }
+                
+                const avgInterval = intervalCount > 0 ? totalInterval / intervalCount : 0.5;
+                const bpm = avgInterval > 0 ? Math.round(60 / avgInterval) : 120;
+                
+                // 限制在合理范围内
+                const clampedBPM = Math.max(60, Math.min(200, bpm));
+                
+                return { bpm: clampedBPM };
+            }
+        };
+
+        // ==================== UI 更新 ====================
+
+        /**
+         * 更新节拍列表显示
+         */
+        function updateBeatListUI() {
+            const { beatList } = state.beatData;
+            
+            elements.beatCount.textContent = beatList.length;
+            elements.bpmDisplay.textContent = state.beatData.bpm || '--';
+            elements.totalTime.textContent = formatTime(state.beatData.duration);
+
+            if (beatList.length === 0) {
+                elements.beatListBody.innerHTML = `
+                    <tr>
+                        <td colspan="4" class="py-8 text-center text-gray-500">
+                            暂无打点数据，请上传 MP3 文件或导入 JSON
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            elements.beatListBody.innerHTML = beatList.map((time, index) => `
+                <tr class="border-b border-gray-800 hover:bg-gray-800/30 transition-colors" data-index="${index}">
+                    <td class="py-3 text-gray-400">${index + 1}</td>
+                    <td class="py-3 font-mono text-blue-400">${time.toFixed(3)}</td>
+                    <td class="py-3 text-gray-300">${formatTimeMs(time)}</td>
+                    <td class="py-3 text-right">
+                        <div class="flex items-center justify-end gap-2">
+                            <button onclick="seekToTime(${time})" class="p-2 text-green-400 hover:text-green-300 hover:bg-green-400/10 rounded-lg transition-all" title="跳转到此位置">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                            </button>
+                            <button onclick="deleteBeat(${index})" class="p-2 text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded-lg transition-all" title="删除此节拍点">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('');
+
+            // 启用按钮
+            elements.btnExport.disabled = false;
+            elements.btnAddBeat.disabled = false;
+            elements.btnClearAll.disabled = false;
+        }
+
+        /**
+         * 更新节拍可视化
+         */
+        function updateVisualizer() {
+            const { beatList, duration } = state.beatData;
+            
+            if (beatList.length === 0 || duration === 0) {
+                elements.visualizerSection.classList.add('hidden');
+                return;
+            }
+
+            elements.visualizerSection.classList.remove('hidden');
+            elements.visualizerPlaceholder.style.display = 'none';
+
+            // 清除旧标记
+            const oldMarkers = elements.beatVisualizer.querySelectorAll('.beat-marker');
+            oldMarkers.forEach(m => m.remove());
+
+            // 生成节拍标记
+            beatList.forEach((time, index) => {
+                const marker = document.createElement('div');
+                marker.className = 'beat-marker absolute top-1/2 -translate-y-1/2 w-3 h-8 bg-gradient-to-b from-purple-500 to-blue-500 rounded-full cursor-pointer';
+                marker.style.left = `${(time / duration) * 100}%`;
+                marker.style.transform = 'translateY(-50%) translateX(-50%)';
+                marker.dataset.time = time;
+                marker.dataset.index = index;
+                marker.title = `${formatTimeMs(time)}`;
+                
+                marker.addEventListener('click', () => seekToTime(time));
+                
+                elements.beatVisualizer.appendChild(marker);
+            });
+        }
+
+        /**
+         * 更新状态显示
+         */
+        function updateStatusDisplay() {
+            elements.beatCount.textContent = state.beatData.beatList.length;
+            elements.bpmDisplay.textContent = state.beatData.bpm || '--';
+        }
+
+        /**
+         * 启用控制按钮
+         */
+        function enableControls() {
+            elements.playerControls.classList.remove('opacity-50', 'pointer-events-none');
+        }
+
+        /**
+         * 高亮当前播放位置的节拍
+         */
+        function highlightCurrentBeat() {
+            const currentTime = elements.audioPlayer.currentTime;
+            const markers = elements.beatVisualizer.querySelectorAll('.beat-marker');
+            
+            markers.forEach((marker, index) => {
+                const time = parseFloat(marker.dataset.time);
+                const diff = Math.abs(currentTime - time);
+                
+                if (diff < 0.1) {
+                    marker.classList.add('active', 'ring-2', 'ring-white');
+                    marker.style.transform = 'translateY(-50%) translateX(-50%) scale(1.3)';
+                } else {
+                    marker.classList.remove('active', 'ring-2', 'ring-white');
+                    marker.style.transform = 'translateY(-50%) translateX(-50%) scale(1)';
+                }
+            });
+        }
+
+        // ==================== 播放控制 ====================
+
+        /**
+         * 跳转到指定时间
+         * @param {number} time - 目标时间（秒）
+         */
+        function seekToTime(time) {
+            if (elements.audioPlayer.src) {
+                elements.audioPlayer.currentTime = Math.max(0, Math.min(time, elements.audioPlayer.duration));
+                elements.audioPlayer.play().catch(console.error);
+                updatePlayButtonState(true);
+            }
+        }
+
+        /**
+         * 更新播放按钮状态
+         * @param {boolean} isPlaying - 是否正在播放
+         */
+        function updatePlayButtonState(isPlaying) {
+            if (isPlaying) {
+                elements.btnPlay.classList.add('hidden');
+                elements.btnPause.classList.remove('hidden');
+            } else {
+                elements.btnPlay.classList.remove('hidden');
+                elements.btnPause.classList.add('hidden');
+            }
+        }
+
+        /**
+         * 更新进度条
+         */
+        function updateProgress() {
+            if (state.isDraggingProgress) return;
+            
+            const player = elements.audioPlayer;
+            if (player.duration) {
+                const progress = (player.currentTime / player.duration) * 100;
+                elements.progressBar.style.width = `${progress}%`;
+                elements.currentTime.textContent = formatTime(player.currentTime);
+                elements.currentPosDisplay.textContent = player.currentTime.toFixed(3) + 's';
+                
+                // 高亮当前节拍
+                highlightCurrentBeat();
+            }
+        }
+
+        // ==================== 打点数据操作 ====================
+
+        /**
+         * 删除指定索引的节拍点
+         * @param {number} index - 节拍点索引
+         */
+        function deleteBeat(index) {
+            if (index < 0 || index >= state.beatData.beatList.length) return;
+            
+            state.beatData.beatList.splice(index, 1);
+            updateBeatListUI();
+            updateVisualizer();
+            updateStatusDisplay();
+        }
+
+        /**
+         * 在当前播放位置添加节拍点
+         */
+        function addBeatAtCurrentPosition() {
+            const currentTime = elements.audioPlayer.currentTime;
+            if (isNaN(currentTime)) return;
+
+            // 检查是否已存在相近的节拍点（避免重复）
+            const existingIndex = state.beatData.beatList.findIndex(
+                time => Math.abs(time - currentTime) < 0.1
+            );
+            
+            if (existingIndex !== -1) {
+                alert('该位置附近已存在节拍点');
+                return;
+            }
+
+            // 插入并保持排序
+            state.beatData.beatList.push(parseFloat(currentTime.toFixed(3)));
+            state.beatData.beatList.sort((a, b) => a - b);
+            
+            updateBeatListUI();
+            updateVisualizer();
+            updateStatusDisplay();
+
+            // 滚动到新添加的节拍
+            const newIndex = state.beatData.beatList.indexOf(parseFloat(currentTime.toFixed(3)));
+            const row = elements.beatListBody.querySelector(`[data-index="${newIndex}"]`);
+            if (row) {
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                row.classList.add('bg-green-500/20');
+                setTimeout(() => row.classList.remove('bg-green-500/20'), 1000);
+            }
+        }
+
+        /**
+         * 清空所有节拍点
+         */
+        function clearAllBeats() {
+            if (!confirm('确定要清空所有节拍点吗？此操作不可撤销。')) return;
+            
+            state.beatData.beatList = [];
+            updateBeatListUI();
+            updateVisualizer();
+            updateStatusDisplay();
+        }
+
+        /**
+         * 导出打点数据为 JSON 文件
+         */
+        function exportBeatData() {
+            if (state.beatData.beatList.length === 0) {
+                alert('没有可导出的打点数据');
+                return;
+            }
+
+            const dataStr = JSON.stringify(state.beatData, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `beat-data-${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        /**
+         * 导入 JSON 打点数据
+         * @param {File} file - JSON 文件
+         */
+        async function importBeatData(file) {
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+
+                // 验证数据格式
+                if (!data.beatList || !Array.isArray(data.beatList)) {
+                    throw new Error('无效的打点数据格式');
+                }
+
+                state.beatData.bpm = data.bpm || 0;
+                state.beatData.beatList = data.beatList.map(t => parseFloat(t));
+                state.beatData.duration = data.duration || 0;
+
+                updateBeatListUI();
+                updateVisualizer();
+                updateStatusDisplay();
+
+                console.log('[BeatTouch] 导入成功:', state.beatData);
+                alert(`成功导入 ${state.beatData.beatList.length} 个节拍点`);
+
+            } catch (error) {
+                console.error('[BeatTouch] 导入失败:', error);
+                alert('导入失败: ' + error.message);
+            }
+        }
+
+        // ==================== 事件监听 ====================
+
+        // 文件上传
+        elements.audioUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            if (!file.type.includes('audio/') && !file.name.endsWith('.mp3')) {
+                alert('请选择有效的音频文件');
+                return;
+            }
+
+            // 显示文件信息
+            elements.fileInfo.classList.remove('hidden');
+            elements.filename.textContent = file.name;
+            elements.filesize.textContent = formatFileSize(file.size);
+
+            // 开始解析
+            analyzeAudio(file);
+        });
+
+        // 播放按钮
+        elements.btnPlay.addEventListener('click', () => {
+            if (elements.audioPlayer.src) {
+                initAudioContext(); // 确保音频上下文已恢复
+                elements.audioPlayer.play().catch(console.error);
+            }
+        });
+
+        // 暂停按钮
+        elements.btnPause.addEventListener('click', () => {
+            elements.audioPlayer.pause();
+        });
+
+        // 停止按钮
+        elements.btnStop.addEventListener('click', () => {
+            elements.audioPlayer.pause();
+            elements.audioPlayer.currentTime = 0;
+            updatePlayButtonState(false);
+        });
+
+        // 音频播放状态监听
+        elements.audioPlayer.addEventListener('play', () => updatePlayButtonState(true));
+        elements.audioPlayer.addEventListener('pause', () => updatePlayButtonState(false));
+        elements.audioPlayer.addEventListener('ended', () => updatePlayButtonState(false));
+        elements.audioPlayer.addEventListener('timeupdate', updateProgress);
+
+        // 进度条拖拽
+        elements.progressContainer.addEventListener('mousedown', (e) => {
+            state.isDraggingProgress = true;
+            updateProgressFromMouse(e);
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (state.isDraggingProgress) {
+                updateProgressFromMouse(e);
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            state.isDraggingProgress = false;
+        });
+
+        function updateProgressFromMouse(e) {
+            const rect = elements.progressContainer.getBoundingClientRect();
+            const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            elements.progressBar.style.width = `${percent * 100}%`;
+            
+            if (elements.audioPlayer.duration) {
+                elements.audioPlayer.currentTime = percent * elements.audioPlayer.duration;
+            }
+        }
+
+        // 音量控制
+        elements.volumeSlider.addEventListener('input', (e) => {
+            const volume = e.target.value / 100;
+            elements.audioPlayer.volume = volume;
+            elements.volumeValue.textContent = e.target.value + '%';
+        });
+
+        // 添加节拍点
+        elements.btnAddBeat.addEventListener('click', addBeatAtCurrentPosition);
+
+        // 清空全部
+        elements.btnClearAll.addEventListener('click', clearAllBeats);
+
+        // 导出 JSON
+        elements.btnExport.addEventListener('click', exportBeatData);
+
+        // 导入 JSON
+        elements.importJson.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                importBeatData(file);
+            }
+        });
+
+        // 键盘快捷键
+        document.addEventListener('keydown', (e) => {
+            // 空格键：播放/暂停
+            if (e.code === 'Space' && e.target.tagName !== 'BUTTON') {
+                e.preventDefault();
+                if (elements.audioPlayer.paused) {
+                    elements.audioPlayer.play().catch(console.error);
+                } else {
+                    elements.audioPlayer.pause();
+                }
+            }
+            // A键：添加节拍点
+            if (e.code === 'KeyA' && !e.ctrlKey && !e.metaKey) {
+                e.preventDefault();
+                addBeatAtCurrentPosition();
+            }
+        });
+
+        // ==================== 初始化 ====================
+        console.log('[BeatTouch] 音乐打点模块已加载');
+        console.log('[BeatTouch] 快捷键: 空格=播放/暂停, A=添加节拍点');
+    </script>
+</body>
+</html>
