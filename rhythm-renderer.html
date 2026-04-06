@@ -948,7 +948,7 @@
             }
 
             /**
-             * 预生成节奏点 - 左右对称交替随机生成
+             * 预生成节奏点 - 全圆均匀分布，左右交替
              */
             spawnNotes(audioTime) {
                 const preGenerateSec = CONSTANTS.PRE_GENERATE_TIME / 1000;
@@ -961,31 +961,41 @@
                         break;
                     }
                     
-                    // 生成左右对称的两个节奏点
-                    // 左侧角度范围: 90°~270° (π/2 ~ 3π/2)
-                    // 右侧角度范围: -90°~90° (-π/2 ~ π/2)
+                    // 生成两个节奏点，全圆均匀分布
+                    // 将圆分成8个扇区，每拍交替扇区
+                    const sectorIndex = this.nextSpawnIndex % 8;  // 0~7 扇区
+                    const sectorAngle = (sectorIndex * Math.PI) / 4;  // 每个扇区45°
                     
-                    // 交替随机位置 - 使用索引决定左右随机
-                    const isEven = this.nextSpawnIndex % 2 === 0;
+                    // 在扇区内随机偏移 ±22.5°
+                    const randomOffset = (Math.random() - 0.5) * (Math.PI / 4);  // ±22.5°
+                    const angle1 = sectorAngle + randomOffset;
                     
-                    // 生成左侧节奏点的随机角度 (90°~270°)
-                    // 更偏向正左方 (180°)，但有随机偏移
-                    const leftBaseAngle = Math.PI;  // 180° - 正左方
-                    const leftRandomOffset = (Math.random() - 0.5) * Math.PI * 0.8;  // ±72° 随机
-                    const leftAngle = leftBaseAngle + leftRandomOffset;
+                    // 第二个节奏点在对向扇区（+180°）
+                    const angle2 = angle1 + Math.PI;
                     
-                    // 右侧节奏点与左侧对称
-                    const rightAngle = -leftAngle;  // 对称角度
+                    // 归一化角度到 0~2π
+                    const normalizeAngle = (angle) => {
+                        while (angle < 0) angle += Math.PI * 2;
+                        while (angle >= Math.PI * 2) angle -= Math.PI * 2;
+                        return angle;
+                    };
                     
-                    // 创建左侧节奏点
-                    const leftNote = new RhythmNote(beatTime, this.nextSpawnIndex, leftAngle, true);
-                    this.notes.push(leftNote);
+                    const finalAngle1 = normalizeAngle(angle1);
+                    const finalAngle2 = normalizeAngle(angle2);
                     
-                    // 创建右侧节奏点（相同节拍时间，对称角度）
-                    const rightNote = new RhythmNote(beatTime, this.nextSpawnIndex + 0.5, rightAngle, false);
-                    this.notes.push(rightNote);
+                    // 判断左右（用于日志）
+                    const isLeft1 = finalAngle1 > Math.PI / 2 && finalAngle1 < Math.PI * 3 / 2;
+                    const isLeft2 = finalAngle2 > Math.PI / 2 && finalAngle2 < Math.PI * 3 / 2;
                     
-                    console.log(`[RhythmRenderer] 生成对称节奏点 #${this.nextSpawnIndex}: beatTime=${beatTime.toFixed(3)}s, 角度=${(leftAngle * 180 / Math.PI).toFixed(1)}°/${(rightAngle * 180 / Math.PI).toFixed(1)}°`);
+                    // 创建第一个节奏点
+                    const note1 = new RhythmNote(beatTime, this.nextSpawnIndex, finalAngle1, isLeft1);
+                    this.notes.push(note1);
+                    
+                    // 创建第二个节奏点（对向位置）
+                    const note2 = new RhythmNote(beatTime, this.nextSpawnIndex + 0.5, finalAngle2, isLeft2);
+                    this.notes.push(note2);
+                    
+                    console.log(`[RhythmRenderer] 生成节奏点 #${this.nextSpawnIndex}: beatTime=${beatTime.toFixed(3)}s, 扇区=${sectorIndex}, 角度=${(finalAngle1 * 180 / Math.PI).toFixed(1)}°/${(finalAngle2 * 180 / Math.PI).toFixed(1)}°`);
                     
                     this.nextSpawnIndex++;
                 }
