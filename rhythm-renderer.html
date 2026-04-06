@@ -73,8 +73,8 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 640px;  /* CENTER_CIRCLE_RADIUS * 2 = 320 * 2 */
-            height: 640px;
+            width: 800px;  /* CENTER_CIRCLE_RADIUS * 2 = 400 * 2 */
+            height: 800px;
             border: 4px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             z-index: 2;
@@ -352,20 +352,24 @@
             ASPECT_RATIO: 16 / 9,
             
             // 时间参数（毫秒）- 延长存在时间，降低速度
-            PRE_GENERATE_TIME: 2000,     // 节拍前预生成时间（延长到2秒）
-            ACTIVE_WINDOW_START: 200,    // 可击中窗口开始（节拍前）
-            ACTIVE_WINDOW_END: 200,      // 可击中窗口结束（节拍后）
-            MISS_THRESHOLD: 500,         // 过期阈值（节拍后）
+            PRE_GENERATE_TIME: 3000,     // 节拍前预生成时间（延长到3秒，匹配生命周期）
+            ACTIVE_WINDOW_START: 300,    // 可击中窗口开始（节拍前，更宽松）
+            ACTIVE_WINDOW_END: 300,      // 可击中窗口结束（节拍后）
+            MISS_THRESHOLD: 800,         // 过期阈值（节拍后，更长）
             
             // 节奏点参数 - 从圆心向外运动
-            CENTER_CIRCLE_RADIUS: 320,   // 中心大圆半径（最佳点击位置）增大4倍
+            CENTER_CIRCLE_RADIUS: 400,   // 中心大圆半径（最佳点击位置）
             NOTE_START_RADIUS: 0,        // 起始半径（从圆心开始）
-            NOTE_END_RADIUS: 400,        // 结束半径（超出中心圆后消失）
-            NOTE_RADIUS: 30,             // 节奏点圆形半径
-            NOTE_LIFETIME: 2000,         // 总生命周期（ms，延长）
+            NOTE_END_RADIUS: 480,        // 结束半径（超出中心圆后消失）
+            NOTE_RADIUS: 28,             // 节奏点圆形半径
+            NOTE_LIFETIME: 3000,         // 总生命周期（ms，延长到3秒）
             
-            // 运动速度控制
-            MOVE_SPEED: 0.04,            // 运动速度系数（越小越慢）
+            // 轨道参数
+            TRACK_COUNT: 8,              // 8条放射性轨道
+            TRACK_WIDTH: 3,              // 轨道线宽
+            
+            // 运动速度控制 - 更慢
+            MOVE_SPEED: 0.02,            // 运动速度系数（越小越慢）
             
             // 视觉效果
             BREATH_MIN_SCALE: 0.95,      // 呼吸最小缩放
@@ -823,7 +827,7 @@
             }
 
             /**
-             * 绘制静态背景
+             * 绘制静态背景 - 包含8条放射性轨道
              */
             drawBackground() {
                 const bgCanvas = document.getElementById('bg-layer');
@@ -841,35 +845,50 @@
                 ctx.fillStyle = gradient;
                 ctx.fillRect(0, 0, this.width, this.height);
                 
-                // 绘制网格线 - 从中心放射
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-                ctx.lineWidth = 1;
+                // 绘制8条放射性轨道
+                const trackLength = Math.max(this.width, this.height);
+                ctx.strokeStyle = 'rgba(100, 150, 255, 0.2)';
+                ctx.lineWidth = CONSTANTS.TRACK_WIDTH;
+                ctx.setLineDash([5, 5]);  // 虚线轨道
                 
-                // 同心圆网格
-                for (let r = 50; r < Math.max(this.width, this.height) / 2; r += 50) {
-                    ctx.beginPath();
-                    ctx.arc(this.center.x, this.center.y, r, 0, Math.PI * 2);
-                    ctx.stroke();
-                }
-                
-                // 放射线
-                for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 12) {
+                for (let i = 0; i < CONSTANTS.TRACK_COUNT; i++) {
+                    const angle = (i * Math.PI * 2) / CONSTANTS.TRACK_COUNT;
                     ctx.beginPath();
                     ctx.moveTo(this.center.x, this.center.y);
                     ctx.lineTo(
-                        this.center.x + Math.cos(angle) * Math.max(this.width, this.height),
-                        this.center.y + Math.sin(angle) * Math.max(this.height, this.height)
+                        this.center.x + Math.cos(angle) * trackLength,
+                        this.center.y + Math.sin(angle) * trackLength
                     );
                     ctx.stroke();
+                    
+                    // 绘制轨道端点标记
+                    const endX = this.center.x + Math.cos(angle) * CONSTANTS.CENTER_CIRCLE_RADIUS;
+                    const endY = this.center.y + Math.sin(angle) * CONSTANTS.CENTER_CIRCLE_RADIUS;
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(endX, endY, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(100, 150, 255, 0.4)';
+                    ctx.fill();
+                    ctx.restore();
                 }
+                ctx.setLineDash([]);
                 
-                // 绘制中心目标圆环（静态背景部分）
+                // 绘制中心目标圆环
                 ctx.save();
                 ctx.beginPath();
                 ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-                ctx.lineWidth = 2;
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.lineWidth = 3;
                 ctx.stroke();
+                
+                // 内圈装饰
+                ctx.beginPath();
+                ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS - 15, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([8, 8]);
+                ctx.stroke();
+                ctx.setLineDash([]);
                 ctx.restore();
             }
 
@@ -948,7 +967,7 @@
             }
 
             /**
-             * 预生成节奏点 - 全圆均匀分布，左右交替
+             * 预生成节奏点 - 严格在8条轨道上，对向生成
              */
             spawnNotes(audioTime) {
                 const preGenerateSec = CONSTANTS.PRE_GENERATE_TIME / 1000;
@@ -961,41 +980,30 @@
                         break;
                     }
                     
-                    // 生成两个节奏点，全圆均匀分布
-                    // 将圆分成8个扇区，每拍交替扇区
-                    const sectorIndex = this.nextSpawnIndex % 8;  // 0~7 扇区
-                    const sectorAngle = (sectorIndex * Math.PI) / 4;  // 每个扇区45°
+                    // 选择轨道（8条轨道，角度为 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°）
+                    const trackIndex = this.nextSpawnIndex % CONSTANTS.TRACK_COUNT;
+                    const trackAngle = (trackIndex * Math.PI * 2) / CONSTANTS.TRACK_COUNT;
                     
-                    // 在扇区内随机偏移 ±22.5°
-                    const randomOffset = (Math.random() - 0.5) * (Math.PI / 4);  // ±22.5°
-                    const angle1 = sectorAngle + randomOffset;
-                    
-                    // 第二个节奏点在对向扇区（+180°）
-                    const angle2 = angle1 + Math.PI;
-                    
-                    // 归一化角度到 0~2π
-                    const normalizeAngle = (angle) => {
-                        while (angle < 0) angle += Math.PI * 2;
-                        while (angle >= Math.PI * 2) angle -= Math.PI * 2;
-                        return angle;
-                    };
-                    
-                    const finalAngle1 = normalizeAngle(angle1);
-                    const finalAngle2 = normalizeAngle(angle2);
+                    // 对向轨道角度（+180°）
+                    const oppositeAngle = trackAngle + Math.PI;
                     
                     // 判断左右（用于日志）
-                    const isLeft1 = finalAngle1 > Math.PI / 2 && finalAngle1 < Math.PI * 3 / 2;
-                    const isLeft2 = finalAngle2 > Math.PI / 2 && finalAngle2 < Math.PI * 3 / 2;
+                    const isLeft1 = trackAngle > Math.PI / 2 && trackAngle < Math.PI * 3 / 2;
+                    const isLeft2 = oppositeAngle > Math.PI / 2 && oppositeAngle < Math.PI * 3 / 2;
                     
-                    // 创建第一个节奏点
-                    const note1 = new RhythmNote(beatTime, this.nextSpawnIndex, finalAngle1, isLeft1);
+                    // 创建第一个节奏点（在选定轨道上）
+                    const note1 = new RhythmNote(beatTime, this.nextSpawnIndex, trackAngle, isLeft1);
+                    note1.trackIndex = trackIndex;  // 记录轨道索引
                     this.notes.push(note1);
                     
-                    // 创建第二个节奏点（对向位置）
-                    const note2 = new RhythmNote(beatTime, this.nextSpawnIndex + 0.5, finalAngle2, isLeft2);
+                    // 创建第二个节奏点（在对向轨道上）
+                    const note2 = new RhythmNote(beatTime, this.nextSpawnIndex + 0.5, oppositeAngle, isLeft2);
+                    note2.trackIndex = (trackIndex + 4) % 8;  // 对向轨道
                     this.notes.push(note2);
                     
-                    console.log(`[RhythmRenderer] 生成节奏点 #${this.nextSpawnIndex}: beatTime=${beatTime.toFixed(3)}s, 扇区=${sectorIndex}, 角度=${(finalAngle1 * 180 / Math.PI).toFixed(1)}°/${(finalAngle2 * 180 / Math.PI).toFixed(1)}°`);
+                    const angleDeg = (trackAngle * 180 / Math.PI).toFixed(0);
+                    const oppositeDeg = ((oppositeAngle * 180 / Math.PI) % 360).toFixed(0);
+                    console.log(`[RhythmRenderer] 生成轨道节奏点 #${this.nextSpawnIndex}: 轨道${trackIndex}(${angleDeg}°)/轨道${note2.trackIndex}(${oppositeDeg}°)`);
                     
                     this.nextSpawnIndex++;
                 }
@@ -1043,30 +1051,39 @@
                 // 外圆环
                 ctx.beginPath();
                 ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-                ctx.lineWidth = 4;
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.lineWidth = 5;
+                ctx.shadowBlur = 20;
+                ctx.shadowColor = 'rgba(100, 200, 255, 0.3)';
                 ctx.stroke();
+                ctx.shadowBlur = 0;
                 
                 // 内圆环（装饰）
                 ctx.beginPath();
-                ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS - 10, 0, Math.PI * 2);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS - 15, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
                 ctx.lineWidth = 2;
-                ctx.setLineDash([10, 10]);
+                ctx.setLineDash([12, 12]);
                 ctx.stroke();
                 ctx.setLineDash([]);
                 
                 // 中心点
                 ctx.beginPath();
-                ctx.arc(this.center.x, this.center.y, 8, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.arc(this.center.x, this.center.y, 10, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.fill();
+                
+                // 中心发光效果
+                ctx.beginPath();
+                ctx.arc(this.center.x, this.center.y, 20, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(100, 200, 255, 0.1)';
                 ctx.fill();
                 
                 // 点击时机提示文字
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-                ctx.font = '14px Arial';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.font = 'bold 16px Arial';
                 ctx.textAlign = 'center';
-                ctx.fillText('点击区域', this.center.x, this.center.y - CONSTANTS.CENTER_CIRCLE_RADIUS - 15);
+                ctx.fillText('点击区域', this.center.x, this.center.y - CONSTANTS.CENTER_CIRCLE_RADIUS - 20);
                 
                 ctx.restore();
             }
