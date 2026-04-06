@@ -376,13 +376,16 @@
             BREATH_MAX_SCALE: 1.05,      // 呼吸最大缩放
             BREATH_SPEED: 0.002,         // 呼吸速度（减慢）
             
-            // 颜色配置
+            // 颜色配置 - 渐变颜色定义
             COLORS: {
                 PENDING: { r: 100, g: 100, b: 100, a: 0.3 },    // 待触发 - 灰色
                 SPAWNING: { r: 150, g: 150, b: 150, a: 0.6 },   // 生成中 - 浅灰
-                ACTIVE: { r: 0, g: 200, b: 255, a: 1 },         // 可击中 - 青色
-                HIT: { r: 0, g: 255, b: 100, a: 1 },            // 已击中 - 绿色
-                MISSED: { r: 255, g: 50, b: 50, a: 0.5 }        // 已过期 - 红色
+                // 可击中状态颜色渐变：淡黄 -> 深黄 -> 橙 -> 红
+                ACTIVE_START: { r: 255, g: 255, b: 150, a: 1 },    // 刚到达圆周 - 淡黄色
+                ACTIVE_MID: { r: 255, g: 200, b: 50, a: 1 },       // 中间 - 金黄色
+                ACTIVE_END: { r: 255, g: 80, b: 50, a: 1 },        // 即将过期 - 橙红色
+                HIT: { r: 50, g: 255, b: 100, a: 1 },              // 已击中 - 亮绿色
+                MISSED: { r: 255, g: 50, b: 50, a: 0.3 }           // 已过期 - 淡红色
             }
         };
 
@@ -547,23 +550,30 @@
                         break;
                         
                     case NoteState.ACTIVE:
-                        // 接近中心圆时高亮 + 呼吸效果
-                        const proximityToCenter = 1 - Math.abs(normalizedProgress - 0.95) / 0.1;
-                        const glowIntensity = Math.max(0, Math.min(1, proximityToCenter));
-                        this.opacity = 1;
-                        this.scale = CONSTANTS.BREATH_MIN_SCALE + 
-                            (CONSTANTS.BREATH_MAX_SCALE - CONSTANTS.BREATH_MIN_SCALE) * breathScale;
-                        // 在最佳点击位置附近时放大
-                        if (glowIntensity > 0.5) {
-                            this.scale *= (1 + glowIntensity * 0.3);
+                        // 可击中状态：淡黄 -> 深黄 -> 橙红 渐变
+                        // 计算距离中心圆的远近（0 = 刚到圆周，1 = 即将过期）
+                        const distFromCenter = this.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS;
+                        const maxDist = CONSTANTS.NOTE_END_RADIUS - CONSTANTS.CENTER_CIRCLE_RADIUS;
+                        const exitProgress = Math.max(0, Math.min(1, distFromCenter / maxDist));
+                        
+                        // 呼吸效果（更 subtle）
+                        this.opacity = 1 - exitProgress * 0.3;  // 离开时稍微变淡
+                        this.scale = 1 + breathScale * 0.1;  // 轻微呼吸
+                        
+                        // 离开时稍微缩小
+                        if (exitProgress > 0.5) {
+                            this.scale *= (1 - (exitProgress - 0.5) * 0.3);
                         }
                         break;
                         
                     case NoteState.HIT:
-                        // 击中效果：快速放大并淡出
+                        // 击中效果：闪烁亮绿色，快速扩大变淡消失
                         this.hitEffectTime -= deltaTime;
-                        this.scale = 1.5 + (1 - this.hitEffectTime / 200) * 2;
-                        this.opacity = this.hitEffectTime / 200;
+                        // 快速扩大：1.5倍 -> 4倍
+                        const hitProgress = 1 - this.hitEffectTime / 300;
+                        this.scale = 1.2 + hitProgress * 3;  // 1.2 -> 4.2
+                        // 快速淡出
+                        this.opacity = Math.max(0, this.hitEffectTime / 300);
                         break;
                         
                     case NoteState.MISSED:
@@ -636,7 +646,7 @@
             hit(audioTime) {
                 this.state = NoteState.HIT;
                 this.stateStartTime = audioTime;
-                this.hitEffectTime = 200;  // 击中效果持续200ms
+                this.hitEffectTime = 300;  // 击中效果持续300ms（更长的闪烁效果）
                 console.log(`[RhythmNote #${this.index}] ✅ 命中! timeDiff=${((audioTime - this.beatTime) * 1000).toFixed(1)}ms`);
                 
                 // 触发回调
@@ -680,10 +690,19 @@
                 // 获取颜色
                 const color = this.getCurrentColor();
                 
-                // 外发光效果
-                if (this.state === NoteState.ACTIVE || this.state === NoteState.SPAWNING) {
-                    ctx.shadowBlur = 20 * this.scale;
-                    ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, 0.8)`;
+                // 外发光效果 - 根据状态调整
+                if (this.state === NoteState.ACTIVE) {
+                    // 可击中状态：黄色/橙色发光
+                    ctx.shadowBlur = 25 * this.scale;
+                    ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, 0.9)`;
+                } else if (this.state === NoteState.HIT) {
+                    // 击中状态：绿色强烈闪烁发光
+                    const flashIntensity = 0.8 + Math.sin(this.hitEffectTime * 0.1) * 0.2;
+                    ctx.shadowBlur = 40 * this.scale * flashIntensity;
+                    ctx.shadowColor = `rgba(50, 255, 100, ${flashIntensity})`;
+                } else if (this.state === NoteState.SPAWNING) {
+                    ctx.shadowBlur = 15 * this.scale;
+                    ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, 0.6)`;
                 }
                 
                 // 绘制主圆
@@ -693,20 +712,34 @@
                 ctx.fill();
                 
                 // 绘制边框
-                ctx.strokeStyle = `rgba(255, 255, 255, ${color.a * 0.8})`;
-                ctx.lineWidth = 3;
+                if (this.state === NoteState.HIT) {
+                    // 击中时白色高亮边框
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${color.a})`;
+                    ctx.lineWidth = 4;
+                } else {
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${color.a * 0.8})`;
+                    ctx.lineWidth = 3;
+                }
                 ctx.stroke();
                 
                 // 绘制内部装饰
                 if (this.state === NoteState.ACTIVE) {
+                    // 可击中状态：内部高光
                     ctx.beginPath();
-                    ctx.arc(this.x, this.y, CONSTANTS.NOTE_RADIUS * this.scale * 0.6, 0, Math.PI * 2);
-                    ctx.fillStyle = `rgba(255, 255, 255, 0.3)`;
+                    ctx.arc(this.x, this.y, CONSTANTS.NOTE_RADIUS * this.scale * 0.5, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 255, 200, 0.4)`;
+                    ctx.fill();
+                } else if (this.state === NoteState.HIT) {
+                    // 击中状态：中心闪光
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, CONSTANTS.NOTE_RADIUS * this.scale * 0.3, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 255, 255, ${color.a})`;
                     ctx.fill();
                 }
                 
                 // 绘制序号（调试用）
                 if (rhythmRenderer && rhythmRenderer.debugMode) {
+                    ctx.shadowBlur = 0;
                     ctx.fillStyle = '#fff';
                     ctx.font = 'bold 12px Arial';
                     ctx.textAlign = 'center';
@@ -719,41 +752,76 @@
 
             /**
              * 获取当前状态对应的颜色
-             * 根据距离中心圆的远近调整颜色亮度
+             * 可击中状态：淡黄 -> 深黄 -> 橙 -> 红，离开圆周后变淡消失
              */
             getCurrentColor() {
-                let baseColor;
-                
                 switch (this.state) {
                     case NoteState.PENDING:
                         return CONSTANTS.COLORS.PENDING;
+                        
                     case NoteState.SPAWNING:
-                        baseColor = { ...CONSTANTS.COLORS.SPAWNING };
-                        break;
-                    case NoteState.ACTIVE:
-                        baseColor = { ...CONSTANTS.COLORS.ACTIVE };
-                        break;
-                    case NoteState.HIT:
-                        return CONSTANTS.COLORS.HIT;
+                        return { ...CONSTANTS.COLORS.SPAWNING };
+                        
+                    case NoteState.ACTIVE: {
+                        // 基于距离中心圆的位置计算颜色
+                        // 0 = 刚到达圆周（淡黄色），1 = 即将离开圆周（红色）
+                        const distFromCenter = Math.max(0, this.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                        const activeRange = CONSTANTS.NOTE_END_RADIUS - CONSTANTS.CENTER_CIRCLE_RADIUS;
+                        const progress = Math.min(1, distFromCenter / (activeRange * 0.6));  // 0.6范围内完成颜色变化
+                        
+                        // 颜色渐变：淡黄 -> 金黄 -> 橙红
+                        let startColor, endColor, t;
+                        
+                        if (progress < 0.5) {
+                            // 0~50%: 淡黄 -> 金黄
+                            startColor = CONSTANTS.COLORS.ACTIVE_START;
+                            endColor = CONSTANTS.COLORS.ACTIVE_MID;
+                            t = progress * 2;
+                        } else {
+                            // 50~100%: 金黄 -> 橙红
+                            startColor = CONSTANTS.COLORS.ACTIVE_MID;
+                            endColor = CONSTANTS.COLORS.ACTIVE_END;
+                            t = (progress - 0.5) * 2;
+                        }
+                        
+                        // 线性插值
+                        const r = Math.round(startColor.r + (endColor.r - startColor.r) * t);
+                        const g = Math.round(startColor.g + (endColor.g - startColor.g) * t);
+                        const b = Math.round(startColor.b + (endColor.b - startColor.b) * t);
+                        
+                        // 离开时逐渐变淡
+                        const fadeStart = 0.7;
+                        const alpha = progress > fadeStart ? 1 - (progress - fadeStart) / (1 - fadeStart) * 0.7 : 1;
+                        
+                        return { r, g, b, a: Math.max(0.3, alpha) };
+                    }
+                        
+                    case NoteState.HIT: {
+                        // 击中效果：闪烁亮绿色，逐渐变淡
+                        const flashIntensity = 1 + Math.sin(this.hitEffectTime * 0.05) * 0.3;  // 闪烁效果
+                        return {
+                            r: Math.min(255, CONSTANTS.COLORS.HIT.r * flashIntensity),
+                            g: Math.min(255, CONSTANTS.COLORS.HIT.g * flashIntensity),
+                            b: Math.min(255, CONSTANTS.COLORS.HIT.b * flashIntensity),
+                            a: this.hitEffectTime / 200  // 逐渐变淡
+                        };
+                    }
+                        
                     case NoteState.MISSED:
-                        return CONSTANTS.COLORS.MISSED;
-                    case NoteState.FADING:
-                        return this.state === NoteState.MISSED ? 
-                               CONSTANTS.COLORS.MISSED : CONSTANTS.COLORS.HIT;
+                    case NoteState.FADING: {
+                        // 离开圆周后变淡消失
+                        const fadeOut = Math.max(0, this.opacity);
+                        return {
+                            r: CONSTANTS.COLORS.MISSED.r,
+                            g: CONSTANTS.COLORS.MISSED.g,
+                            b: CONSTANTS.COLORS.MISSED.b,
+                            a: fadeOut * 0.5  // 半透明淡出
+                        };
+                    }
+                        
                     default:
                         return CONSTANTS.COLORS.PENDING;
                 }
-                
-                // 在中心圆附近时增强亮度
-                const distFromCenter = Math.abs(this.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
-                if (distFromCenter < 30) {
-                    const intensity = 1 + (30 - distFromCenter) / 30 * 0.5;  // 1.0 ~ 1.5
-                    baseColor.r = Math.min(255, baseColor.r * intensity);
-                    baseColor.g = Math.min(255, baseColor.g * intensity);
-                    baseColor.b = Math.min(255, baseColor.b * intensity);
-                }
-                
-                return baseColor;
             }
         }
 
