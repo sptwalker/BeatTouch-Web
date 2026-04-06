@@ -234,17 +234,45 @@
     
     <!-- 音频控制区 -->
     <div id="audio-controls">
-        <label class="upload-label">
-            <input type="file" id="audio-upload" accept="audio/mp3,audio/*">
-            上传音乐 + 打点数据
-        </label>
-        <input type="file" id="beat-data-input" accept=".json">
-        <label class="upload-label" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-            <input type="file" id="beat-file-input" accept=".json" onchange="loadBeatData(this)">
-            导入打点JSON
-        </label>
+        <!-- 预设打点数据选择 -->
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+            <label style="color: #888; font-size: 11px;">📁 选择预设打点数据</label>
+            <select id="preset-beat-select" onchange="loadPresetBeatData(this)" style="padding: 8px 12px; border-radius: 6px; background: #222; color: #fff; border: 1px solid #444; font-size: 13px; min-width: 180px;">
+                <option value="">-- 选择歌曲 --</option>
+                <option value="music-point/beat-data-1775487199028(水手).json">🎵 水手</option>
+                <option value="music-point/beat-data-1775487496502(铿锵玫瑰).json">🎵 铿锵玫瑰</option>
+                <option value="music-point/beat-data-1775487593590(怒放的生命).json">🎵 怒放的生命</option>
+                <option value="music-point/beat-data-1775487621295(光辉岁月).json">🎵 光辉岁月</option>
+                <option value="music-point/beat-data-1775488995886(七十二变).json">🎵 七十二变</option>
+            </select>
+        </div>
+        
+        <div style="width: 1px; height: 40px; background: #444; margin: 0 10px;"></div>
+        
+        <!-- 音频上传 -->
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+            <label style="color: #888; font-size: 11px;">🎵 上传对应音乐</label>
+            <label class="upload-label" style="margin: 0;">
+                <input type="file" id="audio-upload" accept="audio/mp3,audio/*">
+                选择 MP3
+            </label>
+        </div>
+        
+        <div style="width: 1px; height: 40px; background: #444; margin: 0 10px;"></div>
+        
+        <!-- 或自定义导入 -->
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+            <label style="color: #888; font-size: 11px;">📂 或导入自定义JSON</label>
+            <label class="upload-label" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); margin: 0;">
+                <input type="file" id="beat-file-input" accept=".json" onchange="loadBeatData(this)">
+                导入JSON
+            </label>
+        </div>
+        
+        <div style="width: 1px; height: 40px; background: #444; margin: 0 10px;"></div>
+        
         <button class="control-btn" onclick="togglePlay()" id="play-btn" disabled>▶ 播放</button>
-        <span id="audio-info" style="color: #888; font-size: 12px;">未加载音频</span>
+        <span id="audio-info" style="color: #888; font-size: 12px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">未加载音频</span>
     </div>
     
     <!-- 控制面板 -->
@@ -286,9 +314,11 @@
     
     <!-- 开始提示 -->
     <div id="start-hint">
-        <div>请先上传音乐和打点数据</div>
+        <div>🎮 准备开始游戏</div>
         <div style="font-size: 16px; color: #888; margin-top: 10px;">
-            支持 .mp3 + .json 打点数据
+            1. 从上方选择预设打点数据 或导入自定义 JSON<br>
+            2. 上传对应的 MP3 音乐文件<br>
+            3. 点击播放开始游戏！
         </div>
     </div>
     
@@ -1069,7 +1099,49 @@
         let beatData = null;
 
         /**
-         * 加载节拍数据文件
+         * 加载预设打点数据（从 music-point 目录）
+         */
+        async function loadPresetBeatData(select) {
+            const filePath = select.value;
+            if (!filePath) return;
+
+            try {
+                console.log(`[Main] 加载预设打点数据: ${filePath}`);
+                const response = await fetch(filePath);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                beatData = await response.json();
+                console.log('[Main] 预设打点数据加载成功:', beatData);
+                
+                // 加载到渲染器
+                rhythmRenderer.loadBeatData(beatData);
+                
+                // 更新UI提示
+                const fileName = filePath.split('/').pop().replace(/beat-data-\d+\(|\)\.json/g, '');
+                document.getElementById('audio-info').textContent = `已选: ${fileName}`;
+                
+                // 启用播放按钮（如果有音频）
+                document.getElementById('play-btn').disabled = !document.getElementById('audio-player').src;
+                
+                // 提示用户上传对应音乐
+                if (!document.getElementById('audio-player').src) {
+                    alert(`已加载「${fileName}」的打点数据（${beatData.beatList.length} 个节拍点）\n\n请上传对应的 MP3 音乐文件开始游戏！`);
+                } else {
+                    alert(`成功加载 ${beatData.beatList.length} 个节拍点`);
+                }
+                
+            } catch (err) {
+                console.error('[Main] 加载预设失败:', err);
+                alert('加载预设失败: ' + err.message + '\n\n请确保通过 Live Server 运行以支持 fetch API');
+                select.value = '';
+            }
+        }
+
+        /**
+         * 加载自定义节拍数据文件
          */
         function loadBeatData(input) {
             const file = input.files[0];
@@ -1079,13 +1151,16 @@
             reader.onload = (e) => {
                 try {
                     beatData = JSON.parse(e.target.result);
-                    console.log('[Main] 节拍数据加载成功:', beatData);
+                    console.log('[Main] 自定义节拍数据加载成功:', beatData);
                     
                     // 加载到渲染器
                     rhythmRenderer.loadBeatData(beatData);
                     
                     // 启用播放按钮
                     document.getElementById('play-btn').disabled = !document.getElementById('audio-player').src;
+                    
+                    // 重置预设选择框
+                    document.getElementById('preset-beat-select').value = '';
                     
                     alert(`成功加载 ${beatData.beatList.length} 个节拍点`);
                 } catch (err) {
@@ -1106,10 +1181,17 @@
             const audioPlayer = document.getElementById('audio-player');
             audioPlayer.src = url;
             
-            document.getElementById('audio-info').textContent = file.name;
+            // 提取文件名（不含扩展名）用于匹配提示
+            const songName = file.name.replace(/\.[^/.]+$/, '');
+            document.getElementById('audio-info').textContent = `🎵 ${file.name}`;
             document.getElementById('play-btn').disabled = !beatData;
             
             console.log('[Main] 音频加载:', file.name);
+            
+            // 提示用户选择打点数据（如果还没选）
+            if (!beatData) {
+                alert(`已上传音乐: ${songName}\n\n请从上方选择对应的打点数据！`);
+            }
         });
 
         /**
