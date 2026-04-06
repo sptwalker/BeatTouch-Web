@@ -73,8 +73,8 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 160px;  /* CENTER_CIRCLE_RADIUS * 2 = 80 * 2 */
-            height: 160px;
+            width: 640px;  /* CENTER_CIRCLE_RADIUS * 2 = 320 * 2 */
+            height: 640px;
             border: 4px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             z-index: 2;
@@ -358,9 +358,9 @@
             MISS_THRESHOLD: 500,         // 过期阈值（节拍后）
             
             // 节奏点参数 - 从圆心向外运动
-            CENTER_CIRCLE_RADIUS: 80,    // 中心大圆半径（最佳点击位置）
+            CENTER_CIRCLE_RADIUS: 320,   // 中心大圆半径（最佳点击位置）增大4倍
             NOTE_START_RADIUS: 0,        // 起始半径（从圆心开始）
-            NOTE_END_RADIUS: 350,        // 结束半径（超出中心圆后消失）
+            NOTE_END_RADIUS: 400,        // 结束半径（超出中心圆后消失）
             NOTE_RADIUS: 30,             // 节奏点圆形半径
             NOTE_LIFETIME: 2000,         // 总生命周期（ms，延长）
             
