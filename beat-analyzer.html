@@ -727,35 +727,43 @@
             
             /**
              * 对齐节拍点，生成最终的节拍时间戳
+             * 策略：减少节拍点数量，每2拍生成一个节奏点
              */
             alignBeats(onsets, bpm, duration) {
-                const beatInterval = 60 / bpm;
+                // 降低有效BPM，每2拍生成一个节奏点（更适合游戏节奏）
+                const effectiveBPM = bpm / 2;  
+                const beatInterval = 60 / effectiveBPM;  // 每2拍一个间隔
                 const beats = [];
                 
                 // 找到第一个强 onset 作为起始点
                 let startTime = 0;
                 if (onsets.length > 0) {
-                    // 使用最早的 onset 作为参考
                     startTime = onsets[0].time;
                 }
                 
-                // 生成节拍点
+                // 生成节拍点（每2拍一个）
                 let currentTime = startTime;
+                let beatIndex = 0;
                 while (currentTime < duration) {
-                    // 寻找最近的 onset
-                    let nearestOnset = currentTime;
-                    let minDiff = Infinity;
-                    
-                    for (const onset of onsets) {
-                        const diff = Math.abs(onset.time - currentTime);
-                        if (diff < minDiff && diff < beatInterval * 0.3) {
-                            minDiff = diff;
-                            nearestOnset = onset.time;
+                    // 只保留偶数拍（每2拍一个）
+                    if (beatIndex % 2 === 0) {
+                        // 寻找最近的 onset
+                        let nearestOnset = currentTime;
+                        let minDiff = Infinity;
+                        
+                        for (const onset of onsets) {
+                            const diff = Math.abs(onset.time - currentTime);
+                            if (diff < minDiff && diff < beatInterval * 0.3) {
+                                minDiff = diff;
+                                nearestOnset = onset.time;
+                            }
                         }
+                        
+                        beats.push(nearestOnset);
                     }
                     
-                    beats.push(nearestOnset);
-                    currentTime += beatInterval;
+                    currentTime += (60 / bpm);  // 原始BPM的间隔
+                    beatIndex++;
                 }
                 
                 return beats;

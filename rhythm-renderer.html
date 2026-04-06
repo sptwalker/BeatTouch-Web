@@ -67,18 +67,19 @@
             pointer-events: none;
         }
         
-        /* 命中区域指示器 */
+        /* 命中区域指示器 - 中心大圆 */
         #hit-zone {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 120px;
-            height: 120px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
+            width: 160px;  /* CENTER_CIRCLE_RADIUS * 2 = 80 * 2 */
+            height: 160px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
             border-radius: 50%;
             z-index: 2;
             pointer-events: none;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.1);
         }
         
         #hit-zone::before {
@@ -87,10 +88,11 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            width: 20px;
-            height: 20px;
-            background: rgba(255, 255, 255, 0.5);
+            width: 16px;
+            height: 16px;
+            background: rgba(255, 255, 255, 0.6);
             border-radius: 50%;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
         }
         
         /* 分数显示 */
@@ -349,26 +351,31 @@
             // 画布比例
             ASPECT_RATIO: 16 / 9,
             
-            // 时间参数（毫秒）
-            PRE_GENERATE_TIME: 800,      // 节拍前预生成时间
-            ACTIVE_WINDOW_START: 150,    // 可击中窗口开始（节拍前）
-            ACTIVE_WINDOW_END: 150,      // 可击中窗口结束（节拍后）
-            MISS_THRESHOLD: 300,         // 过期阈值（节拍后）
+            // 时间参数（毫秒）- 延长存在时间，降低速度
+            PRE_GENERATE_TIME: 2000,     // 节拍前预生成时间（延长到2秒）
+            ACTIVE_WINDOW_START: 200,    // 可击中窗口开始（节拍前）
+            ACTIVE_WINDOW_END: 200,      // 可击中窗口结束（节拍后）
+            MISS_THRESHOLD: 500,         // 过期阈值（节拍后）
             
-            // 节奏点参数
-            NOTE_START_RADIUS: 50,       // 起始半径（距离中心）
-            NOTE_END_RADIUS: 400,        // 结束半径
-            NOTE_RADIUS: 35,             // 圆形半径
-            NOTE_LIFETIME: 800,          // 总生命周期（ms）
+            // 节奏点参数 - 从圆心向外运动
+            CENTER_CIRCLE_RADIUS: 80,    // 中心大圆半径（最佳点击位置）
+            NOTE_START_RADIUS: 0,        // 起始半径（从圆心开始）
+            NOTE_END_RADIUS: 350,        // 结束半径（超出中心圆后消失）
+            NOTE_RADIUS: 30,             // 节奏点圆形半径
+            NOTE_LIFETIME: 2000,         // 总生命周期（ms，延长）
+            
+            // 运动速度控制
+            MOVE_SPEED: 0.04,            // 运动速度系数（越小越慢）
             
             // 视觉效果
-            BREATH_MIN_SCALE: 0.9,       // 呼吸最小缩放
-            BREATH_MAX_SCALE: 1.1,       // 呼吸最大缩放
-            BREATH_SPEED: 0.003,         // 呼吸速度
+            BREATH_MIN_SCALE: 0.95,      // 呼吸最小缩放
+            BREATH_MAX_SCALE: 1.05,      // 呼吸最大缩放
+            BREATH_SPEED: 0.002,         // 呼吸速度（减慢）
             
             // 颜色配置
             COLORS: {
                 PENDING: { r: 100, g: 100, b: 100, a: 0.3 },    // 待触发 - 灰色
+                SPAWNING: { r: 150, g: 150, b: 150, a: 0.6 },   // 生成中 - 浅灰
                 ACTIVE: { r: 0, g: 200, b: 255, a: 1 },         // 可击中 - 青色
                 HIT: { r: 0, g: 255, b: 100, a: 1 },            // 已击中 - 绿色
                 MISSED: { r: 255, g: 50, b: 50, a: 0.5 }        // 已过期 - 红色
@@ -391,20 +398,25 @@
              * @param {number} beatTime - 节拍时间戳（秒）
              * @param {number} index - 节拍索引
              * @param {number} angle - 发射角度（弧度）
+             * @param {boolean} isLeftSide - 是否在左侧（用于对称生成）
              */
-            constructor(beatTime, index, angle) {
+            constructor(beatTime, index, angle, isLeftSide = true) {
                 this.beatTime = beatTime;           // 目标节拍时间
                 this.index = index;                  // 节拍序号
                 this.angle = angle;                  // 运动角度
+                this.isLeftSide = isLeftSide;        // 是否在左侧
                 
                 // 状态管理
                 this.state = NoteState.PENDING;
                 this.stateStartTime = 0;             // 当前状态开始时间
                 
-                // 位置计算
-                this.currentRadius = CONSTANTS.NOTE_START_RADIUS;
+                // 位置计算 - 从圆心开始向外运动
+                this.currentRadius = CONSTANTS.NOTE_START_RADIUS;  // 从0开始
                 this.x = 0;
                 this.y = 0;
+                
+                // 目标：在节拍时刻到达中心圆周
+                this.targetRadius = CONSTANTS.CENTER_CIRCLE_RADIUS;
                 
                 // 视觉效果
                 this.scale = 0;                      // 当前缩放（渐入用）
@@ -415,7 +427,7 @@
                 // 击中效果
                 this.hitEffectTime = 0;              // 击中效果剩余时间
                 
-                console.log(`[RhythmNote #${index}] 创建: beatTime=${beatTime.toFixed(3)}s, angle=${(angle * 180 / Math.PI).toFixed(1)}°`);
+                console.log(`[RhythmNote #${index}] 创建: beatTime=${beatTime.toFixed(3)}s, angle=${(angle * 180 / Math.PI).toFixed(1)}°, ${isLeftSide ? '左侧' : '右侧'}`);
             }
 
             /**
@@ -433,8 +445,8 @@
                 // 根据状态更新视觉效果
                 this.updateVisuals(timeToBeat, deltaTime);
                 
-                // 更新位置
-                this.updatePosition(center);
+                // 更新位置 - 从圆心向外运动
+                this.updatePosition(center, timeToBeat, deltaTime);
                 
                 // 自动过期检测
                 if (this.state === NoteState.ACTIVE && timeToBeat < -CONSTANTS.MISS_THRESHOLD) {
@@ -448,6 +460,12 @@
             updateState(timeToBeat, audioTime) {
                 const prevState = this.state;
                 
+                // 计算节奏点当前应该在的位置（相对于中心圆的进度）
+                // 0 = 圆心, 1 = 正好在中心圆周上（节拍时刻）
+                const totalTime = CONSTANTS.PRE_GENERATE_TIME + CONSTANTS.ACTIVE_WINDOW_END;
+                const progress = 1 - (timeToBeat + CONSTANTS.ACTIVE_WINDOW_END) / totalTime;
+                const normalizedProgress = Math.max(0, Math.min(1, progress));
+                
                 switch (this.state) {
                     case NoteState.PENDING:
                         // 到达预生成时间点，开始渐入
@@ -458,8 +476,8 @@
                         break;
                         
                     case NoteState.SPAWNING:
-                        // 渐入完成，进入可击中状态
-                        if (timeToBeat <= CONSTANTS.ACTIVE_WINDOW_START) {
+                        // 到达中心圆周附近时进入可击中状态
+                        if (normalizedProgress >= 0.85) {  // 接近中心圆
                             this.state = NoteState.ACTIVE;
                             this.stateStartTime = audioTime;
                             console.log(`[RhythmNote #${this.index}] 🎯 进入可击中状态`);
@@ -468,6 +486,11 @@
                         
                     case NoteState.ACTIVE:
                         // 保持在可击中状态，等待命中或过期
+                        // 如果已经远离中心圆，自动标记为错过
+                        if (normalizedProgress > 1.1) {
+                            this.state = NoteState.MISSED;
+                            this.stateStartTime = audioTime;
+                        }
                         break;
                         
                     case NoteState.HIT:
@@ -502,6 +525,11 @@
                 this.breathPhase += CONSTANTS.BREATH_SPEED * deltaTime;
                 const breathScale = (Math.sin(this.breathPhase) + 1) / 2;  // 0~1
                 
+                // 计算整体进度 (0 = 刚生成, 1 = 正好在节拍时刻)
+                const totalTime = CONSTANTS.PRE_GENERATE_TIME + CONSTANTS.ACTIVE_WINDOW_END;
+                const progress = 1 - (timeToBeat + CONSTANTS.ACTIVE_WINDOW_END) / totalTime;
+                const normalizedProgress = Math.max(0, Math.min(1, progress));
+                
                 switch (this.state) {
                     case NoteState.PENDING:
                         this.opacity = 0;
@@ -509,25 +537,22 @@
                         break;
                         
                     case NoteState.SPAWNING:
-                        // 渐入动画 + 从中心向外移动
-                        const spawnProgress = 1 - (timeToBeat - CONSTANTS.ACTIVE_WINDOW_START) / 
-                                                   (CONSTANTS.PRE_GENERATE_TIME - CONSTANTS.ACTIVE_WINDOW_START);
-                        this.opacity = Math.min(1, spawnProgress * 2);
-                        this.scale = Math.min(1, spawnProgress);
-                        this.currentRadius = CONSTANTS.NOTE_START_RADIUS + 
-                            (CONSTANTS.NOTE_END_RADIUS - CONSTANTS.NOTE_START_RADIUS) * (1 - spawnProgress);
+                        // 渐入动画 - 从圆心缓慢出现并向外移动
+                        this.opacity = Math.min(1, normalizedProgress * 3);  // 快速淡入
+                        this.scale = 0.5 + normalizedProgress * 0.5;  // 从小到大
                         break;
                         
                     case NoteState.ACTIVE:
-                        // 呼吸效果 + 继续向外移动
-                        const activeProgress = (CONSTANTS.ACTIVE_WINDOW_START - timeToBeat) / 
-                                               (CONSTANTS.ACTIVE_WINDOW_START + CONSTANTS.ACTIVE_WINDOW_END);
-                        const moveProgress = Math.min(1, activeProgress);
-                        this.currentRadius = CONSTANTS.NOTE_START_RADIUS + 
-                            (CONSTANTS.NOTE_END_RADIUS - CONSTANTS.NOTE_START_RADIUS) * moveProgress;
+                        // 接近中心圆时高亮 + 呼吸效果
+                        const proximityToCenter = 1 - Math.abs(normalizedProgress - 0.95) / 0.1;
+                        const glowIntensity = Math.max(0, Math.min(1, proximityToCenter));
                         this.opacity = 1;
                         this.scale = CONSTANTS.BREATH_MIN_SCALE + 
                             (CONSTANTS.BREATH_MAX_SCALE - CONSTANTS.BREATH_MIN_SCALE) * breathScale;
+                        // 在最佳点击位置附近时放大
+                        if (glowIntensity > 0.5) {
+                            this.scale *= (1 + glowIntensity * 0.3);
+                        }
                         break;
                         
                     case NoteState.HIT:
@@ -540,18 +565,40 @@
                     case NoteState.MISSED:
                     case NoteState.FADING:
                         // 淡出消失
-                        this.opacity = Math.max(0, this.opacity - deltaTime / 300);
-                        this.scale *= 0.95;
+                        this.opacity = Math.max(0, this.opacity - deltaTime / 400);
+                        this.scale *= 0.98;
                         break;
                 }
             }
 
             /**
-             * 更新位置坐标
+             * 更新位置坐标 - 从圆心向外运动
+             * 在节拍时刻正好到达中心圆周
              */
-            updatePosition(center) {
+            updatePosition(center, timeToBeat, deltaTime) {
+                // 计算应该移动到的半径位置
+                // 0% 时间 = 圆心 (半径 0)
+                // 100% 时间 = 中心圆周 (半径 CENTER_CIRCLE_RADIUS)
+                const totalTime = CONSTANTS.PRE_GENERATE_TIME + CONSTANTS.ACTIVE_WINDOW_END;
+                const progress = 1 - (timeToBeat + CONSTANTS.ACTIVE_WINDOW_END) / totalTime;
+                const normalizedProgress = Math.max(0, Math.min(1.2, progress));  // 允许稍微超出
+                
+                // 使用缓动函数让运动更平滑
+                const easedProgress = this.easeOutCubic(normalizedProgress);
+                
+                // 计算当前半径 - 从0到目标半径
+                this.currentRadius = this.targetRadius * easedProgress;
+                
+                // 计算坐标
                 this.x = center.x + Math.cos(this.angle) * this.currentRadius;
                 this.y = center.y + Math.sin(this.angle) * this.currentRadius;
+            }
+            
+            /**
+             * 缓动函数 - easeOutCubic
+             */
+            easeOutCubic(t) {
+                return 1 - Math.pow(1 - t, 3);
             }
 
             /**
@@ -560,13 +607,18 @@
              * @returns {boolean} 是否成功击中
              */
             tryHit(audioTime) {
-                if (this.state !== NoteState.ACTIVE) {
+                // 只有在可击中状态或接近中心圆时才能击中
+                if (this.state !== NoteState.ACTIVE && this.state !== NoteState.SPAWNING) {
                     return false;
                 }
                 
+                // 检查是否在中心圆周附近
+                const distFromCenter = Math.abs(this.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                
+                // 在中心圆附近或时间窗口内都可以击中
                 const timeDiff = Math.abs(audioTime - this.beatTime) * 1000;
                 
-                if (timeDiff <= CONSTANTS.ACTIVE_WINDOW_START) {
+                if (distFromCenter < 60 || timeDiff <= CONSTANTS.ACTIVE_WINDOW_START) {
                     this.hit(audioTime);
                     return true;
                 }
@@ -663,15 +715,20 @@
 
             /**
              * 获取当前状态对应的颜色
+             * 根据距离中心圆的远近调整颜色亮度
              */
             getCurrentColor() {
+                let baseColor;
+                
                 switch (this.state) {
                     case NoteState.PENDING:
                         return CONSTANTS.COLORS.PENDING;
                     case NoteState.SPAWNING:
-                        return CONSTANTS.COLORS.ACTIVE;
+                        baseColor = { ...CONSTANTS.COLORS.SPAWNING };
+                        break;
                     case NoteState.ACTIVE:
-                        return CONSTANTS.COLORS.ACTIVE;
+                        baseColor = { ...CONSTANTS.COLORS.ACTIVE };
+                        break;
                     case NoteState.HIT:
                         return CONSTANTS.COLORS.HIT;
                     case NoteState.MISSED:
@@ -682,6 +739,17 @@
                     default:
                         return CONSTANTS.COLORS.PENDING;
                 }
+                
+                // 在中心圆附近时增强亮度
+                const distFromCenter = Math.abs(this.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                if (distFromCenter < 30) {
+                    const intensity = 1 + (30 - distFromCenter) / 30 * 0.5;  // 1.0 ~ 1.5
+                    baseColor.r = Math.min(255, baseColor.r * intensity);
+                    baseColor.g = Math.min(255, baseColor.g * intensity);
+                    baseColor.b = Math.min(255, baseColor.b * intensity);
+                }
+                
+                return baseColor;
             }
         }
 
@@ -767,24 +835,25 @@
                     this.center.x, this.center.y, Math.max(this.width, this.height) / 2
                 );
                 gradient.addColorStop(0, '#1a1a4e');
+                gradient.addColorStop(0.5, '#0f0f2e');
                 gradient.addColorStop(1, '#0a0a1e');
                 
                 ctx.fillStyle = gradient;
                 ctx.fillRect(0, 0, this.width, this.height);
                 
-                // 绘制网格线
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+                // 绘制网格线 - 从中心放射
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
                 ctx.lineWidth = 1;
                 
-                // 同心圆
-                for (let r = 100; r < Math.max(this.width, this.height) / 2; r += 100) {
+                // 同心圆网格
+                for (let r = 50; r < Math.max(this.width, this.height) / 2; r += 50) {
                     ctx.beginPath();
                     ctx.arc(this.center.x, this.center.y, r, 0, Math.PI * 2);
                     ctx.stroke();
                 }
                 
-                // 射线
-                for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+                // 放射线
+                for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 12) {
                     ctx.beginPath();
                     ctx.moveTo(this.center.x, this.center.y);
                     ctx.lineTo(
@@ -793,6 +862,15 @@
                     );
                     ctx.stroke();
                 }
+                
+                // 绘制中心目标圆环（静态背景部分）
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
             }
 
             /**
@@ -870,7 +948,7 @@
             }
 
             /**
-             * 预生成节奏点
+             * 预生成节奏点 - 左右对称交替随机生成
              */
             spawnNotes(audioTime) {
                 const preGenerateSec = CONSTANTS.PRE_GENERATE_TIME / 1000;
@@ -883,17 +961,31 @@
                         break;
                     }
                     
-                    // 计算发射角度（从中心放射状分布）
-                    // 使用索引计算角度，每8个方向循环，添加随机偏移
-                    const baseAngle = (this.nextSpawnIndex % 8) * (Math.PI / 4);
-                    const randomOffset = (Math.random() - 0.5) * 0.3; // ±0.3 弧度偏移
-                    const angle = baseAngle + randomOffset;
+                    // 生成左右对称的两个节奏点
+                    // 左侧角度范围: 90°~270° (π/2 ~ 3π/2)
+                    // 右侧角度范围: -90°~90° (-π/2 ~ π/2)
                     
-                    // 创建节奏点
-                    const note = new RhythmNote(beatTime, this.nextSpawnIndex, angle);
-                    this.notes.push(note);
+                    // 交替随机位置 - 使用索引决定左右随机
+                    const isEven = this.nextSpawnIndex % 2 === 0;
                     
-                    console.log(`[RhythmRenderer] 生成节奏点 #${this.nextSpawnIndex}: beatTime=${beatTime.toFixed(3)}s`);
+                    // 生成左侧节奏点的随机角度 (90°~270°)
+                    // 更偏向正左方 (180°)，但有随机偏移
+                    const leftBaseAngle = Math.PI;  // 180° - 正左方
+                    const leftRandomOffset = (Math.random() - 0.5) * Math.PI * 0.8;  // ±72° 随机
+                    const leftAngle = leftBaseAngle + leftRandomOffset;
+                    
+                    // 右侧节奏点与左侧对称
+                    const rightAngle = -leftAngle;  // 对称角度
+                    
+                    // 创建左侧节奏点
+                    const leftNote = new RhythmNote(beatTime, this.nextSpawnIndex, leftAngle, true);
+                    this.notes.push(leftNote);
+                    
+                    // 创建右侧节奏点（相同节拍时间，对称角度）
+                    const rightNote = new RhythmNote(beatTime, this.nextSpawnIndex + 0.5, rightAngle, false);
+                    this.notes.push(rightNote);
+                    
+                    console.log(`[RhythmRenderer] 生成对称节奏点 #${this.nextSpawnIndex}: beatTime=${beatTime.toFixed(3)}s, 角度=${(leftAngle * 180 / Math.PI).toFixed(1)}°/${(rightAngle * 180 / Math.PI).toFixed(1)}°`);
                     
                     this.nextSpawnIndex++;
                 }
@@ -919,12 +1011,54 @@
              * 渲染所有节奏点
              */
             renderNotes() {
-                // 按半径排序，先画远的
+                // 先渲染中心大圆（作为参考）
+                this.renderCenterCircle();
+                
+                // 按半径排序，先画远的（在后面的）
                 const sortedNotes = [...this.notes].sort((a, b) => b.currentRadius - a.currentRadius);
                 
                 for (const note of sortedNotes) {
                     note.render(this.ctx);
                 }
+            }
+            
+            /**
+             * 渲染中心大圆 - 节奏点的目标位置
+             */
+            renderCenterCircle() {
+                const ctx = this.ctx;
+                
+                ctx.save();
+                
+                // 外圆环
+                ctx.beginPath();
+                ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.lineWidth = 4;
+                ctx.stroke();
+                
+                // 内圆环（装饰）
+                ctx.beginPath();
+                ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS - 10, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([10, 10]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                
+                // 中心点
+                ctx.beginPath();
+                ctx.arc(this.center.x, this.center.y, 8, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.fill();
+                
+                // 点击时机提示文字
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('点击区域', this.center.x, this.center.y - CONSTANTS.CENTER_CIRCLE_RADIUS - 15);
+                
+                ctx.restore();
             }
 
             /**
@@ -948,6 +1082,41 @@
                         this.uiCtx.fillText('MISS', note.x, note.y - 30);
                         this.uiCtx.restore();
                     }
+                    
+                    // 调试：显示距离中心圆的距离
+                    if (this.debugMode && (note.state === NoteState.ACTIVE || note.state === NoteState.SPAWNING)) {
+                        const distFromCenter = Math.abs(note.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                        this.uiCtx.save();
+                        this.uiCtx.fillStyle = distFromCenter < 30 ? '#0f0' : '#888';
+                        this.uiCtx.font = '10px Arial';
+                        this.uiCtx.textAlign = 'center';
+                        this.uiCtx.fillText(`${distFromCenter.toFixed(0)}px`, note.x, note.y + 25);
+                        this.uiCtx.restore();
+                    }
+                }
+                
+                // 最佳点击时机提示
+                const activeNotes = this.notes.filter(n => n.state === NoteState.ACTIVE);
+                if (activeNotes.length > 0) {
+                    // 找到最接近中心圆的节奏点
+                    const closestNote = activeNotes.reduce((closest, note) => {
+                        const noteDist = Math.abs(note.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                        const closestDist = Math.abs(closest.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                        return noteDist < closestDist ? note : closest;
+                    });
+                    
+                    const dist = Math.abs(closestNote.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                    
+                    // 在中心圆附近显示提示
+                    if (dist < 40) {
+                        this.uiCtx.save();
+                        this.uiCtx.strokeStyle = `rgba(0, 255, 100, ${1 - dist / 40})`;
+                        this.uiCtx.lineWidth = 3;
+                        this.uiCtx.beginPath();
+                        this.uiCtx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS, 0, Math.PI * 2);
+                        this.uiCtx.stroke();
+                        this.uiCtx.restore();
+                    }
                 }
             }
 
@@ -969,34 +1138,52 @@
                     document.getElementById('next-beat').textContent = '无';
                 }
                 
-                // 最近的命中窗口
-                let nearestWindow = Infinity;
+                // 找到最接近中心圆的节奏点
+                let closestDist = Infinity;
+                let closestTimeDiff = Infinity;
                 for (const note of this.notes) {
-                    if (note.state === NoteState.ACTIVE) {
-                        const window = Math.abs(audioTime - note.beatTime) * 1000;
-                        if (window < nearestWindow) {
-                            nearestWindow = window;
+                    if (note.state === NoteState.ACTIVE || note.state === NoteState.SPAWNING) {
+                        const dist = Math.abs(note.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                        if (dist < closestDist) {
+                            closestDist = dist;
+                            closestTimeDiff = Math.abs(audioTime - note.beatTime) * 1000;
                         }
                     }
                 }
-                document.getElementById('hit-window').textContent = 
-                    nearestWindow === Infinity ? '--' : nearestWindow.toFixed(1);
+                
+                const hitWindowEl = document.getElementById('hit-window');
+                if (closestDist === Infinity) {
+                    hitWindowEl.textContent = '--';
+                    hitWindowEl.style.color = '#0f0';
+                } else {
+                    hitWindowEl.textContent = `${closestDist.toFixed(0)}px / ${closestTimeDiff.toFixed(0)}ms`;
+                    // 在最佳点击位置附近时变绿色
+                    hitWindowEl.style.color = closestDist < 30 ? '#0f0' : '#888';
+                }
             }
 
             /**
              * 尝试击中节奏点
+             * 判断依据：节奏点是否在中心圆周附近（最佳点击位置）
              */
             tryHit() {
                 const audioTime = this.audioPlayer.currentTime;
                 let hitNote = null;
-                let minTimeDiff = Infinity;
+                let bestScore = Infinity;
                 
-                // 找到在可击中窗口内的节奏点
+                // 找到最接近中心圆周的可击中节奏点
                 for (const note of this.notes) {
-                    if (note.state === NoteState.ACTIVE) {
-                        const timeDiff = Math.abs(audioTime - note.beatTime);
-                        if (timeDiff < minTimeDiff) {
-                            minTimeDiff = timeDiff;
+                    if (note.state === NoteState.ACTIVE || note.state === NoteState.SPAWNING) {
+                        // 计算距离中心圆周的距离
+                        const distFromCenter = Math.abs(note.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                        // 计算时间差
+                        const timeDiff = Math.abs(audioTime - note.beatTime) * 1000;
+                        
+                        // 综合评分：距离中心圆越近越好
+                        const score = distFromCenter + timeDiff * 0.1;
+                        
+                        if (distFromCenter < 50 && score < bestScore) {  // 在中心圆附近50像素内
+                            bestScore = score;
                             hitNote = note;
                         }
                     }
@@ -1004,7 +1191,7 @@
                 
                 // 尝试击中
                 if (hitNote && hitNote.tryHit(audioTime)) {
-                    this.onHit(hitNote, minTimeDiff);
+                    this.onHit(hitNote, Math.abs(audioTime - hitNote.beatTime));
                     return true;
                 }
                 
