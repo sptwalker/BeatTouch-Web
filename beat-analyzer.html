@@ -156,6 +156,18 @@
                         <span id="volume-value" class="text-sm text-gray-400 w-10 text-right">70%</span>
                     </div>
 
+                    <!-- 节拍音效开关 -->
+                    <button id="btn-beat-sound" class="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-600/30 border border-purple-500/50 hover:bg-purple-600/50 transition-all" title="切换节拍音效">
+                        <svg id="icon-sound-on" class="w-5 h-5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
+                        </svg>
+                        <svg id="icon-sound-off" class="w-5 h-5 text-gray-500 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path>
+                        </svg>
+                        <span class="text-sm text-purple-400">节拍音效</span>
+                    </button>
+
                     <!-- BPM显示 -->
                     <div class="flex items-center gap-4">
                         <div class="text-center">
@@ -272,13 +284,13 @@
     <!-- 音频元素 -->
     <audio id="audio-player" crossorigin="anonymous"></audio>
 
-    <!-- 引入 web-audio-beat-detector -->
-    <script src="https://cdn.jsdelivr.net/npm/web-audio-beat-detector@8.0.0/build/es5/bundle.min.js"></script>
+    <!-- 引入 Meyda 音频特征提取库 -->
+    <script src="https://cdn.jsdelivr.net/npm/meyda@5.6.3/dist/web/meyda.min.js"></script>
 
     <script>
         /**
          * BeatTouch 音乐自动打点模块
-         * 核心功能：MP3节拍解析、播放控制、打点数据管理
+         * 核心功能：MP3节拍解析、播放控制、打点数据管理、节拍音效
          */
 
         // ==================== 全局状态 ====================
@@ -292,7 +304,9 @@
             },
             isAnalyzing: false,           // 是否正在解析
             currentBeatIndex: -1,         // 当前播放到的节拍索引
-            isDraggingProgress: false     // 是否正在拖拽进度条
+            isDraggingProgress: false,    // 是否正在拖拽进度条
+            beatSoundEnabled: true,       // 节拍音效开关
+            lastPlayedBeatIndex: -1       // 上次播放节拍的索引
         };
 
         // ==================== DOM 元素引用 ====================
@@ -311,6 +325,9 @@
             btnExport: document.getElementById('btn-export'),
             btnAddBeat: document.getElementById('btn-add-beat'),
             btnClearAll: document.getElementById('btn-clear-all'),
+            btnBeatSound: document.getElementById('btn-beat-sound'),
+            iconSoundOn: document.getElementById('icon-sound-on'),
+            iconSoundOff: document.getElementById('icon-sound-off'),
             progressContainer: document.getElementById('progress-container'),
             progressBar: document.getElementById('progress-bar'),
             currentTime: document.getElementById('current-time'),
@@ -366,6 +383,84 @@
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
+        // ==================== 节拍音效系统 ====================
+        const beatSound = {
+            audioContext: null,
+            
+            /**
+             * 初始化音频上下文
+             */
+            init() {
+                if (!this.audioContext) {
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            },
+            
+            /**
+             * 播放节拍音效（短促的点击声）
+             */
+            play() {
+                if (!state.beatSoundEnabled) return;
+                
+                this.init();
+                if (this.audioContext.state === 'suspended') {
+                    this.audioContext.resume();
+                }
+                
+                const now = this.audioContext.currentTime;
+                
+                // 创建振荡器（高频点击声）
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+                
+                // 使用三角波产生短促的点击声
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(1200, now);
+                oscillator.frequency.exponentialRampToValueAtTime(400, now + 0.05);
+                
+                // 快速衰减的包络
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+                
+                oscillator.start(now);
+                oscillator.stop(now + 0.05);
+            },
+            
+            /**
+             * 播放重拍音效（更强的声音）
+             */
+            playStrong() {
+                if (!state.beatSoundEnabled) return;
+                
+                this.init();
+                if (this.audioContext.state === 'suspended') {
+                    this.audioContext.resume();
+                }
+                
+                const now = this.audioContext.currentTime;
+                
+                // 创建振荡器
+                const oscillator = this.audioContext.createOscillator();
+                const gainNode = this.audioContext.createGain();
+                
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(800, now);
+                oscillator.frequency.exponentialRampToValueAtTime(200, now + 0.08);
+                
+                gainNode.gain.setValueAtTime(0.5, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(this.audioContext.destination);
+                
+                oscillator.start(now);
+                oscillator.stop(now + 0.08);
+            }
+        };
+
         // ==================== 音频处理 ====================
 
         /**
@@ -400,21 +495,12 @@
                 state.audioBuffer = await state.audioContext.decodeAudioData(arrayBuffer);
                 state.beatData.duration = state.audioBuffer.duration;
 
-                // 使用 web-audio-beat-detector 检测节拍
-                // 注意：该库需要音频 buffer 作为输入
-                const tempo = await webAudioBeatDetector.analyze(state.audioBuffer);
+                // 使用高精度节拍检测算法
+                console.log('[BeatTouch] 开始高精度节拍分析...');
+                const detectionResult = await beatDetector.analyze(state.audioBuffer);
                 
-                // 计算节拍时间戳列表
-                const beats = [];
-                const interval = 60 / tempo.bpm; // 每拍间隔（秒）
-                const totalBeats = Math.floor(state.audioBuffer.duration / interval);
-                
-                for (let i = 0; i < totalBeats; i++) {
-                    beats.push(parseFloat((i * interval).toFixed(3)));
-                }
-
-                state.beatData.bpm = Math.round(tempo.bpm);
-                state.beatData.beatList = beats;
+                state.beatData.bpm = detectionResult.bpm;
+                state.beatData.beatList = detectionResult.beats;
 
                 // 设置音频源
                 const blobUrl = URL.createObjectURL(file);
@@ -439,60 +525,240 @@
         }
 
         /**
-         * 使用 web-audio-beat-detector 分析节拍
-         * 该库返回 BPM 信息，我们基于 BPM 生成节拍时间戳
+         * 高精度节拍检测器
+         * 使用光谱通量（Spectral Flux）和动态阈值算法
          */
-        const webAudioBeatDetector = {
-            async analyze(audioBuffer) {
-                // 使用库的全局函数
-                if (typeof window.analyze === 'function') {
-                    return await window.analyze(audioBuffer);
-                }
-                // 备用方案：简单的 BPM 估计
-                return this.estimateBPM(audioBuffer);
-            },
-
-            // 简单的 BPM 估计（基于音频能量变化）
-            estimateBPM(audioBuffer) {
-                const channelData = audioBuffer.getChannelData(0);
+        const beatDetector = {
+            /**
+             * 分析音频并检测节拍
+             * @param {AudioBuffer} audioBuffer - 解码后的音频数据
+             * @returns {Object} { bpm, beats }
+             */
+            analyze(audioBuffer) {
                 const sampleRate = audioBuffer.sampleRate;
+                const channelData = audioBuffer.getChannelData(0);
+                
+                // 分析参数
                 const bufferSize = 1024;
                 const hopSize = 512;
+                const numFrames = Math.floor((channelData.length - bufferSize) / hopSize);
                 
-                // 计算能量包络
-                const energies = [];
-                for (let i = 0; i < channelData.length; i += hopSize) {
-                    let energy = 0;
-                    for (let j = 0; j < bufferSize && (i + j) < channelData.length; j++) {
-                        energy += channelData[i + j] * channelData[i + j];
+                // 1. 计算光谱通量（Spectral Flux）
+                const spectralFlux = this.computeSpectralFlux(channelData, sampleRate, bufferSize, hopSize, numFrames);
+                
+                // 2. 计算动态阈值并检测 onset
+                const onsets = this.detectOnsets(spectralFlux, sampleRate, hopSize);
+                
+                // 3. 从 onset 计算 BPM
+                const bpm = this.estimateBPMFromOnsets(onsets);
+                
+                // 4. 使用动态规划或峰值检测精确对齐节拍
+                const beats = this.alignBeats(onsets, bpm, audioBuffer.duration);
+                
+                return {
+                    bpm: Math.round(bpm),
+                    beats: beats.map(t => parseFloat(t.toFixed(3)))
+                };
+            },
+            
+            /**
+             * 计算光谱通量（相邻帧之间的频谱差异）
+             */
+            computeSpectralFlux(channelData, sampleRate, bufferSize, hopSize, numFrames) {
+                const flux = [];
+                let prevMagnitude = null;
+                
+                for (let i = 0; i < numFrames; i++) {
+                    const start = i * hopSize;
+                    const frame = channelData.slice(start, start + bufferSize);
+                    
+                    // 加汉宁窗
+                    const windowed = this.applyHannWindow(frame);
+                    
+                    // FFT 计算频谱
+                    const spectrum = this.fft(windowed);
+                    
+                    // 计算幅度（仅正频率）
+                    const magnitude = new Float32Array(bufferSize / 2);
+                    for (let j = 0; j < bufferSize / 2; j++) {
+                        const real = spectrum[j * 2];
+                        const imag = spectrum[j * 2 + 1];
+                        magnitude[j] = Math.sqrt(real * real + imag * imag);
                     }
-                    energies.push(energy / bufferSize);
+                    
+                    // 计算光谱通量（相邻帧幅度差值的正部和）
+                    if (prevMagnitude) {
+                        let fluxValue = 0;
+                        for (let j = 0; j < magnitude.length; j++) {
+                            const diff = magnitude[j] - prevMagnitude[j];
+                            if (diff > 0) {
+                                fluxValue += diff;
+                            }
+                        }
+                        flux.push(fluxValue);
+                    } else {
+                        flux.push(0);
+                    }
+                    
+                    prevMagnitude = magnitude;
                 }
-
-                // 检测 onset（能量突变点）
+                
+                return flux;
+            },
+            
+            /**
+             * 应用汉宁窗
+             */
+            applyHannWindow(frame) {
+                const windowed = new Float32Array(frame.length);
+                for (let i = 0; i < frame.length; i++) {
+                    const windowValue = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (frame.length - 1)));
+                    windowed[i] = frame[i] * windowValue;
+                }
+                return windowed;
+            },
+            
+            /**
+             * 简化版 FFT 实现
+             */
+            fft(signal) {
+                const n = signal.length;
+                const output = new Float32Array(n * 2);
+                
+                // 基线情况：2点FFT
+                if (n <= 2) {
+                    if (n === 2) {
+                        output[0] = signal[0] + signal[1];
+                        output[1] = 0;
+                        output[2] = signal[0] - signal[1];
+                        output[3] = 0;
+                    } else {
+                        output[0] = signal[0];
+                        output[1] = 0;
+                    }
+                    return output;
+                }
+                
+                // 使用 DFT 计算（对于小 buffer 足够快）
+                for (let k = 0; k < n; k++) {
+                    let real = 0;
+                    let imag = 0;
+                    for (let t = 0; t < n; t++) {
+                        const angle = -2 * Math.PI * k * t / n;
+                        real += signal[t] * Math.cos(angle);
+                        imag += signal[t] * Math.sin(angle);
+                    }
+                    output[k * 2] = real;
+                    output[k * 2 + 1] = imag;
+                }
+                
+                return output;
+            },
+            
+            /**
+             * 使用动态阈值检测 onsets
+             */
+            detectOnsets(spectralFlux, sampleRate, hopSize) {
                 const onsets = [];
-                const threshold = 1.5;
-                for (let i = 1; i < energies.length; i++) {
-                    if (energies[i] > energies[i - 1] * threshold && energies[i] > 0.01) {
-                        onsets.push(i * hopSize / sampleRate);
+                const windowSize = 43; // 约 1 秒窗口（对于 hopSize=512, sampleRate=44100）
+                const multiplier = 1.5; // 阈值倍数
+                
+                for (let i = windowSize; i < spectralFlux.length - windowSize; i++) {
+                    // 计算局部平均值
+                    let localSum = 0;
+                    for (let j = i - windowSize; j < i + windowSize; j++) {
+                        localSum += spectralFlux[j];
+                    }
+                    const localMean = localSum / (windowSize * 2);
+                    
+                    // 检测峰值
+                    if (spectralFlux[i] > localMean * multiplier && 
+                        spectralFlux[i] > spectralFlux[i - 1] && 
+                        spectralFlux[i] > spectralFlux[i + 1]) {
+                        const time = i * hopSize / sampleRate;
+                        onsets.push({
+                            time: time,
+                            strength: spectralFlux[i]
+                        });
                     }
                 }
-
-                // 计算平均间隔估算 BPM
-                let totalInterval = 0;
-                let intervalCount = 0;
-                for (let i = 1; i < Math.min(onsets.length, 20); i++) {
-                    totalInterval += onsets[i] - onsets[i - 1];
-                    intervalCount++;
+                
+                return onsets;
+            },
+            
+            /**
+             * 从 onsets 估算 BPM
+             */
+            estimateBPMFromOnsets(onsets) {
+                if (onsets.length < 2) return 120;
+                
+                // 计算所有间隔
+                const intervals = [];
+                for (let i = 1; i < onsets.length; i++) {
+                    intervals.push(onsets[i].time - onsets[i - 1].time);
                 }
                 
-                const avgInterval = intervalCount > 0 ? totalInterval / intervalCount : 0.5;
-                const bpm = avgInterval > 0 ? Math.round(60 / avgInterval) : 120;
+                // 使用自相关或直方图找到最常见的间隔
+                const histogram = {};
+                intervals.forEach(interval => {
+                    // 量化到 0.01 秒
+                    const quantized = Math.round(interval * 100) / 100;
+                    histogram[quantized] = (histogram[quantized] || 0) + 1;
+                });
                 
-                // 限制在合理范围内
-                const clampedBPM = Math.max(60, Math.min(200, bpm));
+                // 找到最常见的间隔
+                let mostCommonInterval = intervals[0];
+                let maxCount = 0;
+                for (const [interval, count] of Object.entries(histogram)) {
+                    if (count > maxCount) {
+                        maxCount = count;
+                        mostCommonInterval = parseFloat(interval);
+                    }
+                }
                 
-                return { bpm: clampedBPM };
+                // 计算 BPM（考虑多拍情况）
+                const bpm = 60 / mostCommonInterval;
+                
+                // 限制在合理范围并选择最接近的标准 BPM
+                if (bpm < 60) return bpm * 2;
+                if (bpm > 200) return bpm / 2;
+                return bpm;
+            },
+            
+            /**
+             * 对齐节拍点，生成最终的节拍时间戳
+             */
+            alignBeats(onsets, bpm, duration) {
+                const beatInterval = 60 / bpm;
+                const beats = [];
+                
+                // 找到第一个强 onset 作为起始点
+                let startTime = 0;
+                if (onsets.length > 0) {
+                    // 使用最早的 onset 作为参考
+                    startTime = onsets[0].time;
+                }
+                
+                // 生成节拍点
+                let currentTime = startTime;
+                while (currentTime < duration) {
+                    // 寻找最近的 onset
+                    let nearestOnset = currentTime;
+                    let minDiff = Infinity;
+                    
+                    for (const onset of onsets) {
+                        const diff = Math.abs(onset.time - currentTime);
+                        if (diff < minDiff && diff < beatInterval * 0.3) {
+                            minDiff = diff;
+                            nearestOnset = onset.time;
+                        }
+                    }
+                    
+                    beats.push(nearestOnset);
+                    currentTime += beatInterval;
+                }
+                
+                return beats;
             }
         };
 
@@ -598,24 +864,50 @@
         }
 
         /**
-         * 高亮当前播放位置的节拍
+         * 高亮当前播放位置的节拍并播放音效
          */
         function highlightCurrentBeat() {
             const currentTime = elements.audioPlayer.currentTime;
             const markers = elements.beatVisualizer.querySelectorAll('.beat-marker');
             
+            // 查找最近的节拍点
+            let nearestBeatIndex = -1;
+            let minDiff = Infinity;
+            
             markers.forEach((marker, index) => {
                 const time = parseFloat(marker.dataset.time);
                 const diff = Math.abs(currentTime - time);
                 
-                if (diff < 0.1) {
+                if (diff < 0.08) { // 80ms 容差
                     marker.classList.add('active', 'ring-2', 'ring-white');
                     marker.style.transform = 'translateY(-50%) translateX(-50%) scale(1.3)';
+                    
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        nearestBeatIndex = index;
+                    }
                 } else {
                     marker.classList.remove('active', 'ring-2', 'ring-white');
                     marker.style.transform = 'translateY(-50%) translateX(-50%) scale(1)';
                 }
             });
+            
+            // 播放节拍音效（避免重复播放同一节拍）
+            if (nearestBeatIndex !== -1 && nearestBeatIndex !== state.lastPlayedBeatIndex) {
+                state.lastPlayedBeatIndex = nearestBeatIndex;
+                
+                // 每4拍播放一次重拍音效
+                if (nearestBeatIndex % 4 === 0) {
+                    beatSound.playStrong();
+                } else {
+                    beatSound.play();
+                }
+            }
+            
+            // 重置已播放标记（当离开节拍点后）
+            if (nearestBeatIndex === -1) {
+                state.lastPlayedBeatIndex = -1;
+            }
         }
 
         // ==================== 播放控制 ====================
@@ -721,6 +1013,7 @@
             if (!confirm('确定要清空所有节拍点吗？此操作不可撤销。')) return;
             
             state.beatData.beatList = [];
+            state.lastPlayedBeatIndex = -1;
             updateBeatListUI();
             updateVisualizer();
             updateStatusDisplay();
@@ -817,7 +1110,28 @@
         elements.btnStop.addEventListener('click', () => {
             elements.audioPlayer.pause();
             elements.audioPlayer.currentTime = 0;
+            state.lastPlayedBeatIndex = -1;
             updatePlayButtonState(false);
+        });
+
+        // 节拍音效开关
+        elements.btnBeatSound.addEventListener('click', () => {
+            state.beatSoundEnabled = !state.beatSoundEnabled;
+            
+            if (state.beatSoundEnabled) {
+                elements.iconSoundOn.classList.remove('hidden');
+                elements.iconSoundOff.classList.add('hidden');
+                elements.btnBeatSound.querySelector('span').textContent = '节拍音效';
+                elements.btnBeatSound.querySelector('span').classList.remove('text-gray-500');
+                elements.btnBeatSound.querySelector('span').classList.add('text-purple-400');
+                beatSound.init(); // 初始化音频上下文
+            } else {
+                elements.iconSoundOn.classList.add('hidden');
+                elements.iconSoundOff.classList.remove('hidden');
+                elements.btnBeatSound.querySelector('span').textContent = '音效关闭';
+                elements.btnBeatSound.querySelector('span').classList.remove('text-purple-400');
+                elements.btnBeatSound.querySelector('span').classList.add('text-gray-500');
+            }
         });
 
         // 音频播放状态监听
@@ -897,6 +1211,7 @@
         // ==================== 初始化 ====================
         console.log('[BeatTouch] 音乐打点模块已加载');
         console.log('[BeatTouch] 快捷键: 空格=播放/暂停, A=添加节拍点');
+        console.log('[BeatTouch] 节拍音效: 每4拍重音，可点击按钮开关');
     </script>
 </body>
 </html>
