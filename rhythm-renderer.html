@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BeatTouch - 节奏渲染器</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe Hands 手部追踪 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -117,11 +120,11 @@
             text-shadow: 0 0 10px rgba(255, 215, 0, 0.8);
         }
         
-        /* 控制面板 */
+        /* 控制面板 - 右下角 */
         #control-panel {
             position: fixed;
-            top: 20px;
-            left: 20px;
+            bottom: 20px;
+            right: 200px;
             z-index: 100;
             background: rgba(0, 0, 0, 0.8);
             padding: 15px;
@@ -157,11 +160,11 @@
             display: none;
         }
         
-        /* 调试信息 */
+        /* 调试信息 - 右下角 */
         #debug-info {
             position: fixed;
             bottom: 20px;
-            left: 20px;
+            right: 20px;
             z-index: 100;
             background: rgba(0, 0, 0, 0.8);
             padding: 10px 15px;
@@ -172,21 +175,71 @@
             max-width: 300px;
         }
         
-        /* 音频上传区域 */
-        #audio-controls {
+        /* 设置面板 - 左下角（播放前显示） */
+        #setup-panel {
             position: fixed;
-            top: 20px;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.85);
+            padding: 12px 15px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            max-width: 520px;
+            flex-wrap: wrap;
+            transition: all 0.3s;
+        }
+        
+        /* 播放控制栏 - 顶部居中（播放后显示） */
+        #playback-bar {
+            position: fixed;
+            top: 15px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 100;
             background: rgba(0, 0, 0, 0.8);
-            padding: 15px;
-            border-radius: 12px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 18px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
             backdrop-filter: blur(10px);
             display: flex;
             gap: 10px;
             align-items: center;
+            transition: all 0.3s;
+        }
+        
+        #playback-bar.hidden { display: none !important; }
+        
+        #playback-bar .song-name {
+            color: rgba(255,255,255,0.7);
+            font-size: 13px;
+            max-width: 180px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .bar-btn {
+            background: none;
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+        .bar-btn:hover {
+            background: rgba(255,255,255,0.15);
+            border-color: rgba(255,255,255,0.5);
         }
         
         #audio-upload {
@@ -228,14 +281,38 @@
         .hidden {
             display: none !important;
         }
+        
+        /* 摄像头状态指示 */
+        #camera-status {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            z-index: 101;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: #888;
+            display: none;
+            align-items: center;
+            gap: 6px;
+        }
+        #camera-status .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #f44;
+            display: inline-block;
+        }
+        #camera-status.active .dot { background: #4f4; }
+        #camera-status.active { color: #aaa; }
     </style>
 </head>
 <body>
     <!-- 音频元素 -->
     <audio id="audio-player" crossorigin="anonymous"></audio>
     
-    <!-- 音频控制区 -->
-    <div id="audio-controls">
+    <!-- 设置面板（播放前显示） -->
+    <div id="setup-panel">
         <!-- 预设打点数据选择 -->
         <div style="display: flex; flex-direction: column; gap: 5px;">
             <label style="color: #888; font-size: 11px;">📁 选择预设打点数据</label>
@@ -277,6 +354,13 @@
         <span id="audio-info" style="color: #888; font-size: 12px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">未加载音频</span>
     </div>
     
+    <!-- 播放控制栏（播放后显示） -->
+    <div id="playback-bar" class="hidden">
+        <span class="song-name" id="bar-song-name">--</span>
+        <button class="bar-btn" id="bar-play-btn" onclick="togglePlay()" title="播放/暂停">⏸</button>
+        <button class="bar-btn" onclick="stopAndReset()" title="退出" style="color:#f66;">✕</button>
+    </div>
+    
     <!-- 控制面板 -->
     <div id="control-panel">
         <div style="color: #fff; font-size: 14px; margin-bottom: 10px;">🎮 节奏渲染器</div>
@@ -284,7 +368,8 @@
         <button class="control-btn" onclick="simulateHit()">模拟击中</button>
         <div style="margin-top: 10px; color: #888; font-size: 12px;">
             点击/空格: 击中<br>
-            调试: D键
+            调试: D键<br>
+            摄像头: 播放自动开启
         </div>
     </div>
     
@@ -311,6 +396,9 @@
             
             <!-- UI层 -->
             <canvas id="ui-layer" class="game-layer"></canvas>
+            
+            <!-- 手势光标层 -->
+            <canvas id="hand-layer" class="game-layer" style="z-index: 5; pointer-events: none;"></canvas>
         </div>
     </div>
     
@@ -318,7 +406,7 @@
     <div id="start-hint">
         <div>🎮 准备开始游戏</div>
         <div style="font-size: 16px; color: #888; margin-top: 10px;">
-            1. 从上方选择预设打点数据 或导入自定义 JSON<br>
+            1. 从左下角选择预设打点数据 或导入自定义 JSON<br>
             2. 上传对应的 MP3 音乐文件<br>
             3. 点击播放开始游戏！
         </div>
@@ -332,6 +420,9 @@
         <div>Next Beat: <span id="next-beat">--</span></div>
         <div>Hit Window: <span id="hit-window">--</span>ms</div>
     </div>
+    
+    <!-- 摄像头状态 -->
+    <div id="camera-status"><span class="dot"></span><span id="camera-status-text">摄像头未启动</span></div>
 
     <script>
         /**
@@ -351,22 +442,26 @@
             // 画布比例
             ASPECT_RATIO: 16 / 9,
             
-            // 时间参数（毫秒）- 延长存在时间，降低速度
-            PRE_GENERATE_TIME: 3000,     // 节拍前预生成时间（延长到3秒，匹配生命周期）
-            ACTIVE_WINDOW_START: 300,    // 可击中窗口开始（节拍前，更宽松）
-            ACTIVE_WINDOW_END: 300,      // 可击中窗口结束（节拍后）
-            MISS_THRESHOLD: 800,         // 过期阈值（节拍后，更长）
+            // 时间参数（毫秒）- 更长存在时间，更慢速度
+            PRE_GENERATE_TIME: 4500,     // 节拍前预生成时间（4.5秒，更长的运动时间）
+            ACTIVE_WINDOW_START: 350,    // 可击中窗口开始（节拍前）
+            ACTIVE_WINDOW_END: 350,      // 可击中窗口结束（节拍后）
+            MISS_THRESHOLD: 1200,        // 过期阈值（节拍后，更长）
             
             // 节奏点参数 - 从圆心向外运动
             CENTER_CIRCLE_RADIUS: 400,   // 中心大圆半径（最佳点击位置）
             NOTE_START_RADIUS: 0,        // 起始半径（从圆心开始）
-            NOTE_END_RADIUS: 480,        // 结束半径（超出中心圆后消失）
+            NOTE_END_RADIUS: 520,        // 结束半径（超出中心圆后消失）
             NOTE_RADIUS: 28,             // 节奏点圆形半径
-            NOTE_LIFETIME: 3000,         // 总生命周期（ms，延长到3秒）
+            NOTE_LIFETIME: 4500,         // 总生命周期（ms，延长到4.5秒）
             
             // 轨道参数
             TRACK_COUNT: 8,              // 8条放射性轨道
             TRACK_WIDTH: 3,              // 轨道线宽
+            // 轨道角度（22.5°起，间隔45°）
+            TRACK_ANGLES: [
+                22.5, 67.5, 112.5, 157.5, 202.5, 247.5, 292.5, 337.5
+            ].map(deg => deg * Math.PI / 180),
             
             // 运动速度控制 - 更慢
             MOVE_SPEED: 0.02,            // 运动速度系数（越小越慢）
@@ -550,20 +645,16 @@
                         break;
                         
                     case NoteState.ACTIVE:
-                        // 可击中状态：淡黄 -> 深黄 -> 橙红 渐变
-                        // 计算距离中心圆的远近（0 = 刚到圆周，1 = 即将过期）
-                        const distFromCenter = this.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS;
-                        const maxDist = CONSTANTS.NOTE_END_RADIUS - CONSTANTS.CENTER_CIRCLE_RADIUS;
-                        const exitProgress = Math.max(0, Math.min(1, distFromCenter / maxDist));
+                        // 可击中状态：颜色逐渐加深，面积逐渐扩大
+                        // timeToBeat: 正数=还没到节拍, 负数=已过节拍
+                        // 进入ACTIVE时 timeToBeat 约 +350ms，过期时约 -1200ms
+                        const activeTotal = CONSTANTS.ACTIVE_WINDOW_START + CONSTANTS.MISS_THRESHOLD;
+                        const activeProgress = Math.min(1, Math.max(0, 
+                            (CONSTANTS.ACTIVE_WINDOW_START - timeToBeat) / activeTotal));
                         
-                        // 呼吸效果（更 subtle）
-                        this.opacity = 1 - exitProgress * 0.3;  // 离开时稍微变淡
-                        this.scale = 1 + breathScale * 0.1;  // 轻微呼吸
-                        
-                        // 离开时稍微缩小
-                        if (exitProgress > 0.5) {
-                            this.scale *= (1 - (exitProgress - 0.5) * 0.3);
-                        }
+                        this.opacity = 1;
+                        // 面积从 1.0 逐渐扩大到 1.6，加上轻微呼吸
+                        this.scale = (1.0 + activeProgress * 0.6) + breathScale * 0.05;
                         break;
                         
                     case NoteState.HIT:
@@ -692,8 +783,8 @@
                 
                 // 外发光效果 - 根据状态调整
                 if (this.state === NoteState.ACTIVE) {
-                    // 可击中状态：黄色/橙色发光
-                    ctx.shadowBlur = 25 * this.scale;
+                    // 可击中状态：黄色/橙色发光，随面积扩大而增强
+                    ctx.shadowBlur = 20 + 15 * this.scale;
                     ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, 0.9)`;
                 } else if (this.state === NoteState.HIT) {
                     // 击中状态：绿色强烈闪烁发光
@@ -724,10 +815,11 @@
                 
                 // 绘制内部装饰
                 if (this.state === NoteState.ACTIVE) {
-                    // 可击中状态：内部高光
+                    // 可击中状态：内部高光，随面积扩大而增强
+                    const glowAlpha = 0.3 + (this.scale - 1.0) * 0.5;  // scale 越大高光越亮
                     ctx.beginPath();
                     ctx.arc(this.x, this.y, CONSTANTS.NOTE_RADIUS * this.scale * 0.5, 0, Math.PI * 2);
-                    ctx.fillStyle = `rgba(255, 255, 200, 0.4)`;
+                    ctx.fillStyle = `rgba(255, 255, 200, ${Math.min(0.7, glowAlpha)})`;
                     ctx.fill();
                 } else if (this.state === NoteState.HIT) {
                     // 击中状态：中心闪光
@@ -763,37 +855,28 @@
                         return { ...CONSTANTS.COLORS.SPAWNING };
                         
                     case NoteState.ACTIVE: {
-                        // 基于距离中心圆的位置计算颜色
-                        // 0 = 刚到达圆周（淡黄色），1 = 即将离开圆周（红色）
+                        // 颜色渐变：淡黄 -> 金黄 -> 橙红，基于离开中心圆的距离（与时间同步）
                         const distFromCenter = Math.max(0, this.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
                         const activeRange = CONSTANTS.NOTE_END_RADIUS - CONSTANTS.CENTER_CIRCLE_RADIUS;
-                        const progress = Math.min(1, distFromCenter / (activeRange * 0.6));  // 0.6范围内完成颜色变化
+                        const timeProgress = Math.min(1, distFromCenter / activeRange);
                         
-                        // 颜色渐变：淡黄 -> 金黄 -> 橙红
                         let startColor, endColor, t;
                         
-                        if (progress < 0.5) {
-                            // 0~50%: 淡黄 -> 金黄
+                        if (timeProgress < 0.5) {
                             startColor = CONSTANTS.COLORS.ACTIVE_START;
                             endColor = CONSTANTS.COLORS.ACTIVE_MID;
-                            t = progress * 2;
+                            t = timeProgress * 2;
                         } else {
-                            // 50~100%: 金黄 -> 橙红
                             startColor = CONSTANTS.COLORS.ACTIVE_MID;
                             endColor = CONSTANTS.COLORS.ACTIVE_END;
-                            t = (progress - 0.5) * 2;
+                            t = (timeProgress - 0.5) * 2;
                         }
                         
-                        // 线性插值
                         const r = Math.round(startColor.r + (endColor.r - startColor.r) * t);
                         const g = Math.round(startColor.g + (endColor.g - startColor.g) * t);
                         const b = Math.round(startColor.b + (endColor.b - startColor.b) * t);
                         
-                        // 离开时逐渐变淡
-                        const fadeStart = 0.7;
-                        const alpha = progress > fadeStart ? 1 - (progress - fadeStart) / (1 - fadeStart) * 0.7 : 1;
-                        
-                        return { r, g, b, a: Math.max(0.3, alpha) };
+                        return { r, g, b, a: 1 };
                     }
                         
                     case NoteState.HIT: {
@@ -858,6 +941,13 @@
                 this.combo = 0;
                 this.maxCombo = 0;
                 
+                // 圆心波形特效
+                this.pulseRings = [];  // 活跃的脉冲环
+                this.lastBeatPulseIndex = -1;  // 上次触发脉冲的节拍索引
+                this.waveformType = 0;  // 当前波形类型 (0-3)
+                this.waveformSwitchTime = 0;  // 上次切换波形的音频时间
+                this.waveformRotation = 0;  // 波形旋转角度（用于动画）
+                
                 // 初始化
                 this.init();
             }
@@ -884,7 +974,7 @@
                 this.center = { x: this.width / 2, y: this.height / 2 };
                 
                 // 设置所有画布尺寸
-                ['bg-layer', 'rhythm-layer', 'ui-layer'].forEach(id => {
+                ['bg-layer', 'rhythm-layer', 'ui-layer', 'hand-layer'].forEach(id => {
                     const canvas = document.getElementById(id);
                     canvas.width = this.width;
                     canvas.height = this.height;
@@ -920,7 +1010,7 @@
                 ctx.setLineDash([5, 5]);  // 虚线轨道
                 
                 for (let i = 0; i < CONSTANTS.TRACK_COUNT; i++) {
-                    const angle = (i * Math.PI * 2) / CONSTANTS.TRACK_COUNT;
+                    const angle = CONSTANTS.TRACK_ANGLES[i];
                     ctx.beginPath();
                     ctx.moveTo(this.center.x, this.center.y);
                     ctx.lineTo(
@@ -1035,43 +1125,44 @@
             }
 
             /**
-             * 预生成节奏点 - 严格在8条轨道上，对向生成
+             * 预生成节奏点 - 左右半圆交替，约束在8条轨道上
+             * 轨道角度: 22.5°, 67.5°, 112.5°, 157.5°, 202.5°, 247.5°, 292.5°, 337.5°
+             * 左半圆: 索引 2(112.5°), 3(157.5°), 4(202.5°), 5(247.5°)
+             * 右半圆: 索引 0(22.5°), 1(67.5°), 6(292.5°), 7(337.5°)
              */
             spawnNotes(audioTime) {
                 const preGenerateSec = CONSTANTS.PRE_GENERATE_TIME / 1000;
+                const trackAngles = CONSTANTS.TRACK_ANGLES;
+                // 左半圆轨道索引: 112.5°, 157.5°, 202.5°, 247.5°
+                const leftTracks = [2, 3, 4, 5];
+                // 右半圆轨道索引: 22.5°, 67.5°, 292.5°, 337.5°
+                const rightTracks = [0, 1, 6, 7];
                 
                 while (this.nextSpawnIndex < this.beatList.length) {
                     const beatTime = this.beatList[this.nextSpawnIndex];
                     
-                    // 如果节拍时间大于当前时间 + 预生成时间，则停止生成
                     if (beatTime > audioTime + preGenerateSec) {
                         break;
                     }
                     
-                    // 选择轨道（8条轨道，角度为 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°）
-                    const trackIndex = this.nextSpawnIndex % CONSTANTS.TRACK_COUNT;
-                    const trackAngle = (trackIndex * Math.PI * 2) / CONSTANTS.TRACK_COUNT;
+                    // 交替左右半圆：偶数索引=左半圆，奇数索引=右半圆
+                    const isLeftTurn = (this.nextSpawnIndex % 2 === 0);
                     
-                    // 对向轨道角度（+180°）
-                    const oppositeAngle = trackAngle + Math.PI;
+                    // 从对应半圆的轨道中随机选一条
+                    let trackIdx;
+                    if (isLeftTurn) {
+                        trackIdx = leftTracks[Math.floor(Math.random() * leftTracks.length)];
+                    } else {
+                        trackIdx = rightTracks[Math.floor(Math.random() * rightTracks.length)];
+                    }
                     
-                    // 判断左右（用于日志）
-                    const isLeft1 = trackAngle > Math.PI / 2 && trackAngle < Math.PI * 3 / 2;
-                    const isLeft2 = oppositeAngle > Math.PI / 2 && oppositeAngle < Math.PI * 3 / 2;
+                    const angle = trackAngles[trackIdx];
                     
-                    // 创建第一个节奏点（在选定轨道上）
-                    const note1 = new RhythmNote(beatTime, this.nextSpawnIndex, trackAngle, isLeft1);
-                    note1.trackIndex = trackIndex;  // 记录轨道索引
-                    this.notes.push(note1);
-                    
-                    // 创建第二个节奏点（在对向轨道上）
-                    const note2 = new RhythmNote(beatTime, this.nextSpawnIndex + 0.5, oppositeAngle, isLeft2);
-                    note2.trackIndex = (trackIndex + 4) % 8;  // 对向轨道
-                    this.notes.push(note2);
-                    
-                    const angleDeg = (trackAngle * 180 / Math.PI).toFixed(0);
-                    const oppositeDeg = ((oppositeAngle * 180 / Math.PI) % 360).toFixed(0);
-                    console.log(`[RhythmRenderer] 生成轨道节奏点 #${this.nextSpawnIndex}: 轨道${trackIndex}(${angleDeg}°)/轨道${note2.trackIndex}(${oppositeDeg}°)`);
+                    // 创建节奏点（约束在轨道上）
+                    const note = new RhythmNote(beatTime, this.nextSpawnIndex, angle, isLeftTurn);
+                    note.trackAngle = angle;
+                    note.trackIndex = trackIdx;
+                    this.notes.push(note);
                     
                     this.nextSpawnIndex++;
                 }
@@ -1097,10 +1188,16 @@
              * 渲染所有节奏点
              */
             renderNotes() {
-                // 先渲染中心大圆（作为参考）
+                // 先渲染圆心波形脉冲环
+                this.renderPulseRings();
+                
+                // 渲染轨道光晕（节奏点越接近圆周，光晕越强）
+                this.renderTrackGlow();
+                
+                // 渲染中心大圆
                 this.renderCenterCircle();
                 
-                // 按半径排序，先画远的（在后面的）
+                // 按半径排序，先画远的
                 const sortedNotes = [...this.notes].sort((a, b) => b.currentRadius - a.currentRadius);
                 
                 for (const note of sortedNotes) {
@@ -1109,49 +1206,335 @@
             }
             
             /**
-             * 渲染中心大圆 - 节奏点的目标位置
+             * 渲染轨道光晕效果 - 节奏点越接近圆周，对应轨道光晕越强
+             */
+            renderTrackGlow() {
+                const ctx = this.ctx;
+                const R = CONSTANTS.CENTER_CIRCLE_RADIUS;
+                
+                for (const note of this.notes) {
+                    if (note.state === NoteState.PENDING || note.state === NoteState.FADING) continue;
+                    if (note.opacity <= 0) continue;
+                    
+                    // 计算节奏点到圆周的距离比例（0=在圆周上，1=很远）
+                    const dist = Math.abs(note.currentRadius - R);
+                    const maxGlowDist = R * 0.6;  // 在60%半径范围内都有光晕
+                    const glowIntensity = Math.max(0, 1 - dist / maxGlowDist);
+                    
+                    if (glowIntensity <= 0.05) continue;
+                    
+                    // 绘制轨道光晕线
+                    const angle = note.angle;
+                    const glowLength = R + 40;
+                    
+                    ctx.save();
+                    
+                    // 渐变光晕：从圆心到圆周
+                    const gradient = ctx.createLinearGradient(
+                        this.center.x, this.center.y,
+                        this.center.x + Math.cos(angle) * glowLength,
+                        this.center.y + Math.sin(angle) * glowLength
+                    );
+                    
+                    const color = note.getCurrentColor();
+                    const alpha = glowIntensity * 0.4 * note.opacity;
+                    gradient.addColorStop(0, `rgba(${color.r}, ${color.g}, ${color.b}, 0)`);
+                    gradient.addColorStop(0.5, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 0.3})`);
+                    gradient.addColorStop(0.85, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`);
+                    gradient.addColorStop(1, `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha * 0.2})`);
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(this.center.x, this.center.y);
+                    ctx.lineTo(
+                        this.center.x + Math.cos(angle) * glowLength,
+                        this.center.y + Math.sin(angle) * glowLength
+                    );
+                    ctx.strokeStyle = gradient;
+                    ctx.lineWidth = 4 + glowIntensity * 12;  // 越近越粗
+                    ctx.shadowBlur = glowIntensity * 30;
+                    ctx.shadowColor = `rgba(${color.r}, ${color.g}, ${color.b}, ${glowIntensity * 0.6})`;
+                    ctx.stroke();
+                    
+                    // 圆周交汇点发光
+                    if (glowIntensity > 0.3) {
+                        const px = this.center.x + Math.cos(angle) * R;
+                        const py = this.center.y + Math.sin(angle) * R;
+                        ctx.beginPath();
+                        ctx.arc(px, py, 6 + glowIntensity * 10, 0, Math.PI * 2);
+                        ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, ${glowIntensity * 0.5})`;
+                        ctx.shadowBlur = glowIntensity * 25;
+                        ctx.fill();
+                    }
+                    
+                    ctx.restore();
+                }
+            }
+            
+            /**
+             * 触发圆心脉冲波形（在节拍时刻调用）
+             */
+            triggerPulse(color) {
+                this.pulseRings.push({
+                    radius: 15,
+                    maxRadius: CONSTANTS.CENTER_CIRCLE_RADIUS * 0.6,
+                    opacity: 0.8,
+                    speed: 180,
+                    r: color ? color.r : 100,
+                    g: color ? color.g : 200,
+                    b: color ? color.b : 255,
+                    type: this.waveformType,  // 记录触发时的波形类型
+                    age: 0,  // 存活时间（帧数）
+                    startAngle: Math.random() * Math.PI * 2  // 随机起始角度
+                });
+            }
+            
+            /**
+             * 渲染圆心脉冲环形波形特效 - 4种类型，每10秒切换
+             * 类型0: 扩展圆环
+             * 类型1: 旋转多边形爆发
+             * 类型2: 螺旋波
+             * 类型3: 粒子散射星形
+             */
+            renderPulseRings() {
+                const ctx = this.ctx;
+                const audioTime = this.audioPlayer.currentTime;
+                
+                // 每10秒切换波形类型
+                if (audioTime - this.waveformSwitchTime >= 10) {
+                    this.waveformType = (this.waveformType + 1) % 4;
+                    this.waveformSwitchTime = audioTime;
+                    console.log(`[RhythmRenderer] 波形切换为类型 ${this.waveformType}`);
+                }
+                
+                // 更新旋转角度
+                this.waveformRotation += 0.02;
+                
+                // 检查是否有节奏点刚到达圆周附近（触发新脉冲）
+                for (const note of this.notes) {
+                    if (note.state === NoteState.ACTIVE && note.index !== this.lastBeatPulseIndex) {
+                        const dist = Math.abs(note.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                        if (dist < 30) {
+                            this.lastBeatPulseIndex = note.index;
+                            const c = note.getCurrentColor();
+                            this.triggerPulse(c);
+                        }
+                    }
+                }
+                
+                // 更新和渲染脉冲
+                for (let i = this.pulseRings.length - 1; i >= 0; i--) {
+                    const ring = this.pulseRings[i];
+                    
+                    ring.radius += ring.speed * (1 / 60);
+                    ring.opacity -= 0.015;
+                    ring.age++;
+                    
+                    if (ring.opacity <= 0 || ring.radius > ring.maxRadius) {
+                        this.pulseRings.splice(i, 1);
+                        continue;
+                    }
+                    
+                    ctx.save();
+                    
+                    const cx = this.center.x;
+                    const cy = this.center.y;
+                    const colorStr = `rgba(${ring.r}, ${ring.g}, ${ring.b}`;
+                    
+                    switch (ring.type) {
+                        case 0:
+                            // 类型0: 经典扩展圆环
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, ring.radius, 0, Math.PI * 2);
+                            ctx.strokeStyle = `${colorStr}, ${ring.opacity})`;
+                            ctx.lineWidth = 3 + ring.opacity * 4;
+                            ctx.shadowBlur = ring.opacity * 20;
+                            ctx.shadowColor = `${colorStr}, ${ring.opacity * 0.8})`;
+                            ctx.stroke();
+                            // 内环装饰
+                            if (ring.radius > 30) {
+                                ctx.beginPath();
+                                ctx.arc(cx, cy, ring.radius * 0.6, 0, Math.PI * 2);
+                                ctx.strokeStyle = `${colorStr}, ${ring.opacity * 0.4})`;
+                                ctx.lineWidth = 1.5;
+                                ctx.stroke();
+                            }
+                            break;
+                            
+                        case 1: {
+                            // 类型1: 旋转多边形爆发（六边形/八边形）
+                            const sides = 6;
+                            const rot = this.waveformRotation + ring.startAngle;
+                            // 外多边形
+                            ctx.beginPath();
+                            for (let s = 0; s <= sides; s++) {
+                                const a = rot + (s * Math.PI * 2) / sides;
+                                const px = cx + Math.cos(a) * ring.radius;
+                                const py = cy + Math.sin(a) * ring.radius;
+                                if (s === 0) ctx.moveTo(px, py);
+                                else ctx.lineTo(px, py);
+                            }
+                            ctx.closePath();
+                            ctx.strokeStyle = `${colorStr}, ${ring.opacity})`;
+                            ctx.lineWidth = 2.5 + ring.opacity * 3;
+                            ctx.shadowBlur = ring.opacity * 18;
+                            ctx.shadowColor = `${colorStr}, ${ring.opacity * 0.7})`;
+                            ctx.stroke();
+                            // 内旋转多边形（反方向）
+                            if (ring.radius > 25) {
+                                ctx.beginPath();
+                                for (let s = 0; s <= sides; s++) {
+                                    const a = -rot + (s * Math.PI * 2) / sides;
+                                    const px = cx + Math.cos(a) * ring.radius * 0.5;
+                                    const py = cy + Math.sin(a) * ring.radius * 0.5;
+                                    if (s === 0) ctx.moveTo(px, py);
+                                    else ctx.lineTo(px, py);
+                                }
+                                ctx.closePath();
+                                ctx.strokeStyle = `${colorStr}, ${ring.opacity * 0.5})`;
+                                ctx.lineWidth = 1.5;
+                                ctx.stroke();
+                            }
+                            break;
+                        }
+                            
+                        case 2: {
+                            // 类型2: 螺旋波
+                            const spiralTurns = 2;
+                            const spiralPoints = 80;
+                            ctx.beginPath();
+                            for (let s = 0; s <= spiralPoints; s++) {
+                                const t = s / spiralPoints;
+                                const a = ring.startAngle + t * Math.PI * 2 * spiralTurns + this.waveformRotation;
+                                const r = ring.radius * t;
+                                const px = cx + Math.cos(a) * r;
+                                const py = cy + Math.sin(a) * r;
+                                if (s === 0) ctx.moveTo(px, py);
+                                else ctx.lineTo(px, py);
+                            }
+                            ctx.strokeStyle = `${colorStr}, ${ring.opacity * 0.9})`;
+                            ctx.lineWidth = 2 + ring.opacity * 3;
+                            ctx.shadowBlur = ring.opacity * 15;
+                            ctx.shadowColor = `${colorStr}, ${ring.opacity * 0.6})`;
+                            ctx.stroke();
+                            // 反向螺旋
+                            ctx.beginPath();
+                            for (let s = 0; s <= spiralPoints; s++) {
+                                const t = s / spiralPoints;
+                                const a = ring.startAngle + Math.PI - t * Math.PI * 2 * spiralTurns - this.waveformRotation;
+                                const r = ring.radius * t;
+                                const px = cx + Math.cos(a) * r;
+                                const py = cy + Math.sin(a) * r;
+                                if (s === 0) ctx.moveTo(px, py);
+                                else ctx.lineTo(px, py);
+                            }
+                            ctx.strokeStyle = `${colorStr}, ${ring.opacity * 0.5})`;
+                            ctx.lineWidth = 1.5;
+                            ctx.stroke();
+                            break;
+                        }
+                            
+                        case 3: {
+                            // 类型3: 粒子散射星形
+                            const rays = 8;
+                            const rot3 = this.waveformRotation * 0.5 + ring.startAngle;
+                            // 绘制星形射线
+                            for (let s = 0; s < rays; s++) {
+                                const a = rot3 + (s * Math.PI * 2) / rays;
+                                const innerR = ring.radius * 0.2;
+                                const outerR = ring.radius;
+                                // 主射线
+                                ctx.beginPath();
+                                ctx.moveTo(cx + Math.cos(a) * innerR, cy + Math.sin(a) * innerR);
+                                ctx.lineTo(cx + Math.cos(a) * outerR, cy + Math.sin(a) * outerR);
+                                ctx.strokeStyle = `${colorStr}, ${ring.opacity * 0.8})`;
+                                ctx.lineWidth = 2 + ring.opacity * 2;
+                                ctx.shadowBlur = ring.opacity * 12;
+                                ctx.shadowColor = `${colorStr}, ${ring.opacity * 0.5})`;
+                                ctx.stroke();
+                                // 射线端点光点
+                                ctx.beginPath();
+                                ctx.arc(
+                                    cx + Math.cos(a) * outerR,
+                                    cy + Math.sin(a) * outerR,
+                                    3 + ring.opacity * 4, 0, Math.PI * 2
+                                );
+                                ctx.fillStyle = `${colorStr}, ${ring.opacity})`;
+                                ctx.fill();
+                            }
+                            // 中间连接环
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, ring.radius * 0.5, 0, Math.PI * 2);
+                            ctx.strokeStyle = `${colorStr}, ${ring.opacity * 0.3})`;
+                            ctx.lineWidth = 1;
+                            ctx.shadowBlur = 0;
+                            ctx.stroke();
+                            break;
+                        }
+                    }
+                    
+                    ctx.restore();
+                }
+            }
+            
+            /**
+             * 渲染中心大圆 - 节奏点的目标位置 + 动态呼吸
              */
             renderCenterCircle() {
                 const ctx = this.ctx;
+                const audioTime = this.audioPlayer.currentTime;
+                
+                // 根据脉冲环数量产生微弱的呼吸感
+                const pulseScale = 1 + this.pulseRings.length * 0.005;
+                const R = CONSTANTS.CENTER_CIRCLE_RADIUS;
                 
                 ctx.save();
                 
                 // 外圆环
                 ctx.beginPath();
-                ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS, 0, Math.PI * 2);
+                ctx.arc(this.center.x, this.center.y, R, 0, Math.PI * 2);
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
                 ctx.lineWidth = 5;
-                ctx.shadowBlur = 20;
-                ctx.shadowColor = 'rgba(100, 200, 255, 0.3)';
+                ctx.shadowBlur = 20 + this.pulseRings.length * 5;
+                ctx.shadowColor = `rgba(100, 200, 255, ${0.3 + this.pulseRings.length * 0.1})`;
                 ctx.stroke();
                 ctx.shadowBlur = 0;
                 
                 // 内圆环（装饰）
                 ctx.beginPath();
-                ctx.arc(this.center.x, this.center.y, CONSTANTS.CENTER_CIRCLE_RADIUS - 15, 0, Math.PI * 2);
+                ctx.arc(this.center.x, this.center.y, R - 15, 0, Math.PI * 2);
                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
                 ctx.lineWidth = 2;
                 ctx.setLineDash([12, 12]);
                 ctx.stroke();
                 ctx.setLineDash([]);
                 
-                // 中心点
+                // 中心动态发光核心
+                const coreGlow = 0.1 + this.pulseRings.length * 0.08;
+                const coreRadius = 20 * pulseScale;
+                const gradient = ctx.createRadialGradient(
+                    this.center.x, this.center.y, 0,
+                    this.center.x, this.center.y, coreRadius * 2
+                );
+                gradient.addColorStop(0, `rgba(200, 230, 255, ${Math.min(0.8, coreGlow + 0.3)})`);
+                gradient.addColorStop(0.4, `rgba(100, 200, 255, ${coreGlow})`);
+                gradient.addColorStop(1, 'rgba(100, 200, 255, 0)');
+                
                 ctx.beginPath();
-                ctx.arc(this.center.x, this.center.y, 10, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+                ctx.arc(this.center.x, this.center.y, coreRadius * 2, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
                 ctx.fill();
                 
-                // 中心发光效果
+                // 中心实心点
                 ctx.beginPath();
-                ctx.arc(this.center.x, this.center.y, 20, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(100, 200, 255, 0.1)';
+                ctx.arc(this.center.x, this.center.y, 8 * pulseScale, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
                 ctx.fill();
                 
-                // 点击时机提示文字
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                // 点击区域提示
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
                 ctx.font = 'bold 16px Arial';
                 ctx.textAlign = 'center';
-                ctx.fillText('点击区域', this.center.x, this.center.y - CONSTANTS.CENTER_CIRCLE_RADIUS - 20);
+                ctx.fillText('点击区域', this.center.x, this.center.y - R - 20);
                 
                 ctx.restore();
             }
@@ -1481,17 +1864,80 @@
          */
         function togglePlay() {
             const audioPlayer = document.getElementById('audio-player');
-            const btn = document.getElementById('play-btn');
+            const setupPanel = document.getElementById('setup-panel');
+            const playbackBar = document.getElementById('playback-bar');
+            const barPlayBtn = document.getElementById('bar-play-btn');
+            const playBtn = document.getElementById('play-btn');
             
             if (audioPlayer.paused) {
                 audioPlayer.play();
-                btn.textContent = '⏸ 暂停';
+                // 切换到紧凑播放栏
+                setupPanel.style.display = 'none';
+                playbackBar.classList.remove('hidden');
+                barPlayBtn.textContent = '⏸';
+                playBtn.textContent = '⏸ 暂停';
+                // 更新歌名
+                const songInfo = document.getElementById('audio-info').textContent;
+                document.getElementById('bar-song-name').textContent = songInfo;
+                // 隐藏开始提示
+                document.getElementById('start-hint').classList.add('hidden');
                 rhythmRenderer.start();
+                // 自动开启摄像头
+                if (!handTracker.isActive) handTracker.start();
             } else {
                 audioPlayer.pause();
-                btn.textContent = '▶ 播放';
+                barPlayBtn.textContent = '▶';
+                playBtn.textContent = '▶ 播放';
                 rhythmRenderer.stop();
             }
+        }
+        
+        /**
+         * 停止并重置（退出按钮）
+         */
+        function stopAndReset() {
+            const audioPlayer = document.getElementById('audio-player');
+            const setupPanel = document.getElementById('setup-panel');
+            const playbackBar = document.getElementById('playback-bar');
+            const playBtn = document.getElementById('play-btn');
+            
+            // 停止音频
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            
+            // 停止渲染
+            rhythmRenderer.stop();
+            
+            // 自动关闭摄像头
+            if (handTracker.isActive) handTracker.stop();
+            
+            // 重置节奏点
+            rhythmRenderer.notes = [];
+            rhythmRenderer.nextSpawnIndex = 0;
+            rhythmRenderer.pulseRings = [];
+            rhythmRenderer.lastBeatPulseIndex = -1;
+            rhythmRenderer.waveformType = 0;
+            rhythmRenderer.waveformSwitchTime = 0;
+            rhythmRenderer.score = 0;
+            rhythmRenderer.combo = 0;
+            
+            // 清空画布
+            rhythmRenderer.ctx.clearRect(0, 0, rhythmRenderer.width, rhythmRenderer.height);
+            rhythmRenderer.uiCtx.clearRect(0, 0, rhythmRenderer.width, rhythmRenderer.height);
+            if (handTracker.handCtx) {
+                handTracker.handCtx.clearRect(0, 0, handTracker.handCanvas.width, handTracker.handCanvas.height);
+            }
+            
+            // 切换回设置面板
+            setupPanel.style.display = 'flex';
+            playbackBar.classList.add('hidden');
+            playBtn.textContent = '▶ 播放';
+            
+            // 重置分数显示
+            document.getElementById('score').textContent = '0';
+            document.getElementById('combo').textContent = 'Combo: 0';
+            
+            console.log('[Main] 已停止并重置');
         }
 
         /**
@@ -1504,9 +1950,360 @@
         // 音频播放结束处理
         document.getElementById('audio-player').addEventListener('ended', function() {
             document.getElementById('play-btn').textContent = '▶ 播放';
+            document.getElementById('bar-play-btn').textContent = '▶';
             rhythmRenderer.stop();
+            // 自动关闭摄像头
+            if (handTracker.isActive) handTracker.stop();
+            // 恢复设置面板
+            document.getElementById('setup-panel').style.display = 'flex';
+            document.getElementById('playback-bar').classList.add('hidden');
         });
 
+        // ==================== 手部追踪模块 ====================
+        const handTracker = {
+            hands: null,
+            camera: null,
+            isActive: false,
+            handCanvas: null,
+            handCtx: null,
+            
+            // 双手光标状态
+            cursors: [
+                { x: 0, y: 0, visible: false, smoothX: 0, smoothY: 0, lastHitTime: 0, trail: [], label: 'L' },
+                { x: 0, y: 0, visible: false, smoothX: 0, smoothY: 0, lastHitTime: 0, trail: [], label: 'R' }
+            ],
+            
+            // 平滑参数
+            SMOOTH_FACTOR: 0.35,       // EMA 平滑系数 (0~1, 越小越平滑)
+            CURSOR_RADIUS: 40,         // 光标半径
+            HIT_COOLDOWN: 300,         // 同一手击中冷却时间(ms)
+            HIT_DISTANCE: 70,          // 手掌触碰节奏点的判定距离
+            TRAIL_LENGTH: 8,           // 拖尾长度
+            
+            /**
+             * 初始化 MediaPipe Hands
+             */
+            async init() {
+                this.handCanvas = document.getElementById('hand-layer');
+                this.handCtx = this.handCanvas.getContext('2d');
+                
+                // 同步画布尺寸
+                this.syncCanvasSize();
+                window.addEventListener('resize', () => this.syncCanvasSize());
+                
+                this.hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+                });
+                
+                this.hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 0,       // 0=Lite 最低延迟
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.5
+                });
+                
+                this.hands.onResults((results) => this.onHandResults(results));
+                
+                console.log('[HandTracker] MediaPipe Hands 初始化完成');
+            },
+            
+            syncCanvasSize() {
+                if (!this.handCanvas) return;
+                const wrapper = document.getElementById('canvas-wrapper');
+                const rect = wrapper.getBoundingClientRect();
+                this.handCanvas.width = rect.width;
+                this.handCanvas.height = rect.height;
+            },
+            
+            /**
+             * 启动摄像头
+             */
+            async start() {
+                if (this.isActive) return;
+                
+                const statusEl = document.getElementById('camera-status');
+                const statusText = document.getElementById('camera-status-text');
+                statusEl.style.display = 'flex';
+                statusText.textContent = '正在启动摄像头...';
+                
+                try {
+                    if (!this.hands) await this.init();
+                    
+                    const videoEl = document.getElementById('camera-layer');
+                    
+                    this.camera = new Camera(videoEl, {
+                        onFrame: async () => {
+                            if (this.isActive) {
+                                await this.hands.send({ image: videoEl });
+                            }
+                        },
+                        width: 640,
+                        height: 360,
+                        facingMode: 'user'
+                    });
+                    
+                    await this.camera.start();
+                    this.isActive = true;
+                    
+                    // 显示摄像头背景
+                    videoEl.style.opacity = '0.25';
+                    videoEl.style.transform = 'scaleX(-1)';  // 镜像
+                    
+                    statusEl.classList.add('active');
+                    statusText.textContent = '手部追踪中';
+                    
+                    // 启动手部光标渲染循环
+                    this.renderLoop();
+                    
+                    console.log('[HandTracker] 摄像头已启动');
+                } catch (err) {
+                    console.error('[HandTracker] 摄像头启动失败:', err);
+                    statusText.textContent = '摄像头启动失败';
+                    alert('摄像头启动失败: ' + err.message);
+                }
+            },
+            
+            /**
+             * 停止摄像头
+             */
+            stop() {
+                this.isActive = false;
+                if (this.camera) {
+                    this.camera.stop();
+                    this.camera = null;
+                }
+                
+                // 隐藏摄像头背景
+                const videoEl = document.getElementById('camera-layer');
+                videoEl.style.opacity = '0';
+                
+                // 清空手部画布
+                if (this.handCtx) {
+                    this.handCtx.clearRect(0, 0, this.handCanvas.width, this.handCanvas.height);
+                }
+                
+                // 重置光标
+                this.cursors.forEach(c => { c.visible = false; c.trail = []; });
+                
+                const statusEl = document.getElementById('camera-status');
+                statusEl.classList.remove('active');
+                document.getElementById('camera-status-text').textContent = '摄像头已关闭';
+                
+                console.log('[HandTracker] 摄像头已停止');
+            },
+            
+            /**
+             * MediaPipe 手部检测回调
+             */
+            onHandResults(results) {
+                if (!results.multiHandLandmarks) return;
+                
+                const w = this.handCanvas.width;
+                const h = this.handCanvas.height;
+                
+                // 重置所有光标可见性
+                this.cursors[0].visible = false;
+                this.cursors[1].visible = false;
+                
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    const landmarks = results.multiHandLandmarks[i];
+                    const handedness = results.multiHandedness[i];
+                    
+                    // MediaPipe 镜像：Right 实际是用户左手，Left 实际是用户右手
+                    // 光标索引: 0=左手, 1=右手
+                    const isRight = handedness.label === 'Left';  // 用户的右手
+                    const cursorIdx = isRight ? 1 : 0;
+                    const cursor = this.cursors[cursorIdx];
+                    
+                    // 使用手掌中心（wrist=0 和 middle_finger_mcp=9 的中点）
+                    const wrist = landmarks[0];
+                    const middleMcp = landmarks[9];
+                    const rawX = (wrist.x + middleMcp.x) / 2;
+                    const rawY = (wrist.y + middleMcp.y) / 2;
+                    
+                    // 镜像映射到画布坐标
+                    const targetX = (1 - rawX) * w;
+                    const targetY = rawY * h;
+                    
+                    // EMA 平滑防抖
+                    if (!cursor.visible) {
+                        // 首次出现，直接跳到位置
+                        cursor.smoothX = targetX;
+                        cursor.smoothY = targetY;
+                    } else {
+                        cursor.smoothX += (targetX - cursor.smoothX) * this.SMOOTH_FACTOR;
+                        cursor.smoothY += (targetY - cursor.smoothY) * this.SMOOTH_FACTOR;
+                    }
+                    
+                    cursor.x = cursor.smoothX;
+                    cursor.y = cursor.smoothY;
+                    cursor.visible = true;
+                    
+                    // 更新拖尾
+                    cursor.trail.push({ x: cursor.x, y: cursor.y });
+                    if (cursor.trail.length > this.TRAIL_LENGTH) {
+                        cursor.trail.shift();
+                    }
+                }
+                
+                // 碰撞检测 - 手掌触碰节奏点
+                this.checkCollisions();
+            },
+            
+            /**
+             * 碰撞检测：手掌光标 vs ACTIVE 节奏点
+             */
+            checkCollisions() {
+                if (!rhythmRenderer || !rhythmRenderer.isRunning) return;
+                
+                const now = performance.now();
+                const audioTime = rhythmRenderer.audioPlayer.currentTime;
+                
+                for (const cursor of this.cursors) {
+                    if (!cursor.visible) continue;
+                    if (now - cursor.lastHitTime < this.HIT_COOLDOWN) continue;
+                    
+                    for (const note of rhythmRenderer.notes) {
+                        if (note.state !== NoteState.ACTIVE && note.state !== NoteState.SPAWNING) continue;
+                        
+                        // 计算手掌光标与节奏点的距离
+                        const dx = cursor.x - note.x;
+                        const dy = cursor.y - note.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        
+                        // 判定距离 = 光标半径 + 节奏点半径 * 缩放
+                        const hitDist = this.CURSOR_RADIUS + CONSTANTS.NOTE_RADIUS * note.scale;
+                        
+                        if (dist < hitDist) {
+                            // 额外检查：节奏点是否在中心圆附近（保持与原有逻辑一致）
+                            const distFromCenter = Math.abs(note.currentRadius - CONSTANTS.CENTER_CIRCLE_RADIUS);
+                            const timeDiff = Math.abs(audioTime - note.beatTime) * 1000;
+                            
+                            if (distFromCenter < 80 || timeDiff <= CONSTANTS.ACTIVE_WINDOW_START) {
+                                if (note.tryHit(audioTime)) {
+                                    rhythmRenderer.onHit(note, Math.abs(audioTime - note.beatTime));
+                                    cursor.lastHitTime = now;
+                                    console.log(`[HandTracker] 🖐️ 手掌击中节奏点 #${note.index}`);
+                                    break;  // 一只手一帧只击中一个
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            
+            /**
+             * 手部光标渲染循环
+             */
+            renderLoop() {
+                if (!this.isActive) return;
+                
+                const ctx = this.handCtx;
+                const w = this.handCanvas.width;
+                const h = this.handCanvas.height;
+                ctx.clearRect(0, 0, w, h);
+                
+                const now = performance.now();
+                
+                for (const cursor of this.cursors) {
+                    if (!cursor.visible) continue;
+                    
+                    const isHitting = (now - cursor.lastHitTime) < 150;
+                    const R = this.CURSOR_RADIUS;
+                    
+                    // 绘制拖尾
+                    if (cursor.trail.length > 1) {
+                        ctx.save();
+                        ctx.lineCap = 'round';
+                        for (let i = 1; i < cursor.trail.length; i++) {
+                            const alpha = (i / cursor.trail.length) * 0.3;
+                            const width = (i / cursor.trail.length) * R * 0.6;
+                            ctx.beginPath();
+                            ctx.moveTo(cursor.trail[i - 1].x, cursor.trail[i - 1].y);
+                            ctx.lineTo(cursor.trail[i].x, cursor.trail[i].y);
+                            ctx.strokeStyle = cursor.label === 'L' 
+                                ? `rgba(0, 200, 255, ${alpha})` 
+                                : `rgba(255, 100, 200, ${alpha})`;
+                            ctx.lineWidth = width;
+                            ctx.stroke();
+                        }
+                        ctx.restore();
+                    }
+                    
+                    ctx.save();
+                    
+                    // 击中闪光效果
+                    if (isHitting) {
+                        const flashProgress = 1 - (now - cursor.lastHitTime) / 150;
+                        ctx.shadowBlur = 40 + flashProgress * 30;
+                        ctx.shadowColor = 'rgba(50, 255, 100, 0.9)';
+                        
+                        // 扩散环
+                        ctx.beginPath();
+                        ctx.arc(cursor.x, cursor.y, R * (1.5 + (1 - flashProgress) * 1.5), 0, Math.PI * 2);
+                        ctx.strokeStyle = `rgba(50, 255, 100, ${flashProgress * 0.6})`;
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
+                    }
+                    
+                    // 外圈光晕
+                    const gradient = ctx.createRadialGradient(
+                        cursor.x, cursor.y, R * 0.3,
+                        cursor.x, cursor.y, R * 1.2
+                    );
+                    const baseColor = cursor.label === 'L' 
+                        ? [0, 200, 255]   // 左手 - 青色
+                        : [255, 100, 200]; // 右手 - 粉色
+                    
+                    gradient.addColorStop(0, `rgba(${baseColor.join(',')}, ${isHitting ? 0.6 : 0.35})`);
+                    gradient.addColorStop(0.6, `rgba(${baseColor.join(',')}, ${isHitting ? 0.3 : 0.15})`);
+                    gradient.addColorStop(1, `rgba(${baseColor.join(',')}, 0)`);
+                    
+                    ctx.beginPath();
+                    ctx.arc(cursor.x, cursor.y, R * 1.2, 0, Math.PI * 2);
+                    ctx.fillStyle = gradient;
+                    ctx.fill();
+                    
+                    // 主圆环
+                    ctx.beginPath();
+                    ctx.arc(cursor.x, cursor.y, R, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(${baseColor.join(',')}, ${isHitting ? 1 : 0.7})`;
+                    ctx.lineWidth = isHitting ? 4 : 2.5;
+                    ctx.shadowBlur = isHitting ? 25 : 12;
+                    ctx.shadowColor = `rgba(${baseColor.join(',')}, 0.6)`;
+                    ctx.stroke();
+                    
+                    // 内圈十字准星
+                    const crossSize = R * 0.35;
+                    ctx.beginPath();
+                    ctx.moveTo(cursor.x - crossSize, cursor.y);
+                    ctx.lineTo(cursor.x + crossSize, cursor.y);
+                    ctx.moveTo(cursor.x, cursor.y - crossSize);
+                    ctx.lineTo(cursor.x, cursor.y + crossSize);
+                    ctx.strokeStyle = `rgba(255, 255, 255, ${isHitting ? 0.9 : 0.5})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.shadowBlur = 0;
+                    ctx.stroke();
+                    
+                    // 中心点
+                    ctx.beginPath();
+                    ctx.arc(cursor.x, cursor.y, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 255, 255, ${isHitting ? 1 : 0.7})`;
+                    ctx.fill();
+                    
+                    // 手标签
+                    ctx.font = 'bold 11px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = `rgba(${baseColor.join(',')}, 0.8)`;
+                    ctx.fillText(cursor.label, cursor.x, cursor.y - R - 8);
+                    
+                    ctx.restore();
+                }
+                
+                requestAnimationFrame(() => this.renderLoop());
+            }
+        };
+        
         // ==================== 初始化 ====================
         window.addEventListener('DOMContentLoaded', () => {
             rhythmRenderer = new RhythmRenderer();
@@ -1514,6 +2311,7 @@
             console.log('[Main] 操作说明:');
             console.log('  - 空格键/点击: 击中节奏点');
             console.log('  - D键: 切换调试模式');
+            console.log('  - 📷 摄像头: 手掌触碰节奏点');
             console.log('  - 先上传音乐，再导入打点JSON');
         });
     </script>
